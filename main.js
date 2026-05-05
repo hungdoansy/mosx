@@ -18,10 +18,10 @@ const {
   nativeImage,
   nativeTheme,
   dialog,
-} = require('electron');
-const { autoUpdater } = require('electron-updater');
-const path = require('path');
-const fs = require('fs');
+} = require("electron");
+const { autoUpdater } = require("electron-updater");
+const path = require("path");
+const fs = require("fs");
 
 // ============================================================
 //  HỆ THỐNG DOWNLOAD
@@ -32,10 +32,12 @@ let downloadCounter = 0;
 // ============================================================
 //  CẤU HÌNH CHUNG
 // ============================================================
-const MESSENGER_URL = 'https://www.facebook.com/messages';
-const APP_ID = 'com.messenger.premium';
+const MESSENGER_URL = "https://www.facebook.com/messages";
+const APP_ID = "com.messenger.premium";
 const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+  process.platform === "darwin"
+    ? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 
 // ============================================================
 //  CHỐNG CHẠY TRÙNG LẶP (Single Instance Lock)
@@ -45,34 +47,34 @@ if (!gotTheLock) {
   app.quit();
 }
 
-if (process.platform === 'win32') {
+if (process.platform === "win32") {
   app.setAppUserModelId(APP_ID);
 }
 
 // ============================================================
 //  HỆ THỐNG LƯU CÀI ĐẶT
 // ============================================================
-const SETTINGS_PATH = path.join(app.getPath('userData'), 'settings.json');
+const SETTINGS_PATH = path.join(app.getPath("userData"), "settings.json");
 
 const DEFAULT_SETTINGS = {
   windowBounds: { width: 1200, height: 800 },
   startMinimized: false,
   autoLaunch: false,
   minimizeToTray: true,
-  globalHotkey: 'Ctrl+Shift+M',
-  currentTheme: 'default',
+  globalHotkey: process.platform === "darwin" ? "Cmd+Shift+M" : "Ctrl+Shift+M",
+  currentTheme: "default",
   isDarkMode: true,
   alwaysOnTop: false,
   blockSeen: false,
   blockTyping: false,
   appLockEnabled: false,
-  appLockHash: '',
+  appLockHash: "",
   appLockTimeout: 5,
 };
 
 function loadSettings() {
   try {
-    const data = fs.readFileSync(SETTINGS_PATH, 'utf8');
+    const data = fs.readFileSync(SETTINGS_PATH, "utf8");
     return { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -81,7 +83,7 @@ function loadSettings() {
 
 function saveSettings(data) {
   try {
-    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), 'utf8');
+    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), "utf8");
   } catch (err) {}
 }
 
@@ -102,7 +104,7 @@ let activeProfileId = null;
 // ============================================================
 function createBadgeIcon(count) {
   const size = 18;
-  const text = count > 9 ? '9+' : String(count);
+  const text = count > 9 ? "9+" : String(count);
   const fontSize = count > 9 ? 9 : 11;
 
   const svg = `
@@ -115,7 +117,7 @@ function createBadgeIcon(count) {
     </svg>`;
 
   return nativeImage.createFromDataURL(
-    `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`
+    `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`,
   );
 }
 
@@ -123,18 +125,20 @@ function createBadgeIcon(count) {
 //  TẠO SYSTEM TRAY
 // ============================================================
 function createTray() {
-  const iconPath = path.join(__dirname, 'icon.png');
+  const iconPath = path.join(__dirname, "icon.png");
   let trayIcon;
   try {
-    trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+    trayIcon = nativeImage
+      .createFromPath(iconPath)
+      .resize({ width: 16, height: 16 });
   } catch {
     trayIcon = nativeImage.createEmpty();
   }
   tray = new Tray(trayIcon);
   updateTrayMenu();
-  tray.setToolTip('Messlỏ');
+  tray.setToolTip("Messlỏ");
 
-  tray.on('click', () => {
+  tray.on("click", () => {
     if (!mainWindow) return;
     if (mainWindow.isVisible() && mainWindow.isFocused()) {
       mainWindow.hide();
@@ -144,7 +148,7 @@ function createTray() {
     }
   });
 
-  tray.on('double-click', () => {
+  tray.on("double-click", () => {
     if (!mainWindow) return;
     mainWindow.show();
     mainWindow.focus();
@@ -154,24 +158,68 @@ function createTray() {
 function updateTrayMenu() {
   if (!tray) return;
   const contextMenu = Menu.buildFromTemplate([
-    { label: '💬 Mở Messenger', click: () => { mainWindow.show(); mainWindow.focus(); } },
-    { type: 'separator' },
-    { label: '🔄 Tải lại trang', click: () => {
-      if (activeProfileId && browserViews[activeProfileId]) {
-        browserViews[activeProfileId].webContents.reload();
-      }
-    }},
-    { label: '🚀 Khởi động cùng Windows', type: 'checkbox', checked: settings.autoLaunch, click: (item) => toggleAutoLaunch(item.checked) },
-    { label: '📌 Thu nhỏ xuống Tray khi đóng', type: 'checkbox', checked: settings.minimizeToTray, click: (item) => { settings.minimizeToTray = item.checked; saveSettings(settings); } },
-    { type: 'separator' },
-    { label: '🛡️ Bảo mật', submenu: [
-        { label: 'Chặn hiển thị "Đã xem"', type: 'checkbox', checked: settings.blockSeen, click: (item) => toggleBlockSeen(item.checked) },
-        { label: 'Chặn hiển thị "Đang nhập"', type: 'checkbox', checked: settings.blockTyping, click: (item) => toggleBlockTyping(item.checked) }
-    ]},
-    { type: 'separator' },
-    { label: '⬇️ Kiểm tra cập nhật', click: () => checkForUpdates(true) },
-    { type: 'separator' },
-    { label: '❌ Thoát hoàn toàn', click: () => { isQuitting = true; app.quit(); } },
+    {
+      label: "💬 Mở Messenger",
+      click: () => {
+        mainWindow.show();
+        mainWindow.focus();
+      },
+    },
+    { type: "separator" },
+    {
+      label: "🔄 Tải lại trang",
+      click: () => {
+        if (activeProfileId && browserViews[activeProfileId]) {
+          browserViews[activeProfileId].webContents.reload();
+        }
+      },
+    },
+    {
+      label:
+        process.platform === "darwin"
+          ? "🚀 Khởi động cùng macOS"
+          : "🚀 Khởi động cùng Windows",
+      type: "checkbox",
+      checked: settings.autoLaunch,
+      click: (item) => toggleAutoLaunch(item.checked),
+    },
+    {
+      label: "📌 Thu nhỏ xuống Tray khi đóng",
+      type: "checkbox",
+      checked: settings.minimizeToTray,
+      click: (item) => {
+        settings.minimizeToTray = item.checked;
+        saveSettings(settings);
+      },
+    },
+    { type: "separator" },
+    {
+      label: "🛡️ Bảo mật",
+      submenu: [
+        {
+          label: 'Chặn hiển thị "Đã xem"',
+          type: "checkbox",
+          checked: settings.blockSeen,
+          click: (item) => toggleBlockSeen(item.checked),
+        },
+        {
+          label: 'Chặn hiển thị "Đang nhập"',
+          type: "checkbox",
+          checked: settings.blockTyping,
+          click: (item) => toggleBlockTyping(item.checked),
+        },
+      ],
+    },
+    { type: "separator" },
+    { label: "⬇️ Kiểm tra cập nhật", click: () => checkForUpdates(true) },
+    { type: "separator" },
+    {
+      label: "❌ Thoát hoàn toàn",
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
   ]);
   tray.setContextMenu(contextMenu);
 }
@@ -194,51 +242,61 @@ let isManualUpdateCheck = false;
 function setupAutoUpdater() {
   autoUpdater.autoDownload = false;
 
-  autoUpdater.on('update-available', (info) => {
-    dialog.showMessageBox({
-      type: 'info',
-      title: 'Có bản cập nhật mới',
-      message: `Đã có bản cập nhật mới v${info.version}. Bạn có muốn tải xuống và cài đặt không?`,
-      buttons: ['Tải xuống', 'Bỏ qua']
-    }).then(result => {
-      if (result.response === 0) {
-        autoUpdater.downloadUpdate();
-      }
-    });
+  autoUpdater.on("update-available", (info) => {
+    dialog
+      .showMessageBox({
+        type: "info",
+        title: "Có bản cập nhật mới",
+        message: `Đã có bản cập nhật mới v${info.version}. Bạn có muốn tải xuống và cài đặt không?`,
+        buttons: ["Tải xuống", "Bỏ qua"],
+      })
+      .then((result) => {
+        if (result.response === 0) {
+          autoUpdater.downloadUpdate();
+        }
+      });
   });
 
-  autoUpdater.on('update-not-available', (info) => {
+  autoUpdater.on("update-not-available", (info) => {
     if (isManualUpdateCheck) {
       dialog.showMessageBox({
-        title: 'Không có cập nhật',
-        message: 'Bạn đang sử dụng phiên bản mới nhất.'
+        title: "Không có cập nhật",
+        message: "Bạn đang sử dụng phiên bản mới nhất.",
       });
       isManualUpdateCheck = false;
     }
   });
 
-  autoUpdater.on('update-downloaded', () => {
-    dialog.showMessageBox({
-      title: 'Đã tải xong cập nhật',
-      message: 'Bản cập nhật đã được tải xuống. Ứng dụng sẽ khởi động lại để cài đặt.',
-      buttons: ['Cài đặt và Khởi động lại']
-    }).then(() => {
-      isQuitting = true;
-      autoUpdater.quitAndInstall();
-    });
+  autoUpdater.on("update-downloaded", () => {
+    dialog
+      .showMessageBox({
+        title: "Đã tải xong cập nhật",
+        message:
+          "Bản cập nhật đã được tải xuống. Ứng dụng sẽ khởi động lại để cài đặt.",
+        buttons: ["Cài đặt và Khởi động lại"],
+      })
+      .then(() => {
+        isQuitting = true;
+        autoUpdater.quitAndInstall();
+      });
   });
 
-  autoUpdater.on('error', (err) => {
+  autoUpdater.on("error", (err) => {
     if (isManualUpdateCheck) {
-      let errorMessage = err == null ? "Lỗi không xác định" : (err.stack || err).toString();
-      if (errorMessage.includes('No published versions on GitHub') || errorMessage.includes('404 Not Found')) {
+      let errorMessage =
+        err == null ? "Lỗi không xác định" : (err.stack || err).toString();
+      if (
+        errorMessage.includes("No published versions on GitHub") ||
+        errorMessage.includes("404 Not Found")
+      ) {
         dialog.showMessageBox({
-          type: 'info',
-          title: 'Thông tin cập nhật',
-          message: 'Chưa có bản cập nhật nào được phát hành. Bạn đang sử dụng phiên bản mới nhất!'
+          type: "info",
+          title: "Thông tin cập nhật",
+          message:
+            "Chưa có bản cập nhật nào được phát hành. Bạn đang sử dụng phiên bản mới nhất!",
         });
       } else {
-        dialog.showErrorBox('Lỗi cập nhật', errorMessage);
+        dialog.showErrorBox("Lỗi cập nhật", errorMessage);
       }
       isManualUpdateCheck = false;
     }
@@ -258,7 +316,7 @@ function checkForUpdates(manual = false) {
 function toggleAutoLaunch(enable) {
   settings.autoLaunch = enable;
   saveSettings(settings);
-  app.setLoginItemSettings({ openAtLogin: enable, path: app.getPath('exe') });
+  app.setLoginItemSettings({ openAtLogin: enable, path: app.getPath("exe") });
 }
 
 // ============================================================
@@ -274,7 +332,7 @@ function updateBrowserViewBounds() {
     x: LEFT_SIDEBAR,
     y: 0,
     width: Math.max(bounds.width - LEFT_SIDEBAR - RIGHT_SIDEBAR, 0),
-    height: Math.max(bounds.height, 0)
+    height: Math.max(bounds.height, 0),
   });
 }
 
@@ -282,10 +340,10 @@ function setupDownloadHandler(sess) {
   if (sess._downloadHandlerSet) return;
   sess._downloadHandlerSet = true;
 
-  sess.on('will-download', (event, item, webContents) => {
+  sess.on("will-download", (event, item, webContents) => {
     const id = ++downloadCounter;
-    const filename = item.getFilename() || 'download';
-    const downloadsPath = app.getPath('downloads');
+    const filename = item.getFilename() || "download";
+    const downloadsPath = app.getPath("downloads");
     const savePath = path.join(downloadsPath, filename);
     item.setSavePath(savePath);
 
@@ -294,27 +352,36 @@ function setupDownloadHandler(sess) {
 
     // Notify renderer about new download
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('download-started', {
-        id, filename, savePath, total,
+      mainWindow.webContents.send("download-started", {
+        id,
+        filename,
+        savePath,
+        total,
       });
     }
 
-    item.on('updated', (event, state) => {
+    item.on("updated", (event, state) => {
       const received = item.getReceivedBytes();
       const dl = activeDownloads.get(id);
       if (dl) dl.received = received;
 
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('download-progress', {
-          id, received, total: item.getTotalBytes(), state,
+        mainWindow.webContents.send("download-progress", {
+          id,
+          received,
+          total: item.getTotalBytes(),
+          state,
         });
       }
     });
 
-    item.once('done', (event, state) => {
+    item.once("done", (event, state) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('download-done', {
-          id, state, savePath, filename,
+        mainWindow.webContents.send("download-done", {
+          id,
+          state,
+          savePath,
+          filename,
         });
       }
       activeDownloads.delete(id);
@@ -327,48 +394,85 @@ function setupWebContents(contents, profileId) {
   setupDownloadHandler(contents.session);
 
   contents.setWindowOpenHandler(({ url }) => {
-    if (url.includes('facebook.com') || url.includes('messenger.com') || url.includes('fbcdn.net')) {
-      return { action: 'allow' };
+    if (
+      url.includes("facebook.com") ||
+      url.includes("messenger.com") ||
+      url.includes("fbcdn.net")
+    ) {
+      return { action: "allow" };
     }
     shell.openExternal(url);
-    return { action: 'deny' };
+    return { action: "deny" };
   });
 
-  contents.on('context-menu', (event, params) => {
+  contents.on("context-menu", (event, params) => {
     const menu = new Menu();
     if (params.misspelledWord) {
       for (const suggestion of params.dictionarySuggestions) {
-        menu.append(new MenuItem({ label: suggestion, click: () => contents.replaceMisspelling(suggestion) }));
+        menu.append(
+          new MenuItem({
+            label: suggestion,
+            click: () => contents.replaceMisspelling(suggestion),
+          }),
+        );
       }
-      if (params.dictionarySuggestions.length > 0) menu.append(new MenuItem({ type: 'separator' }));
+      if (params.dictionarySuggestions.length > 0)
+        menu.append(new MenuItem({ type: "separator" }));
     }
-    if (params.selectionText) menu.append(new MenuItem({ label: '📋 Sao chép', role: 'copy' }));
+    if (params.selectionText)
+      menu.append(new MenuItem({ label: "📋 Sao chép", role: "copy" }));
     if (params.isEditable) {
-      menu.append(new MenuItem({ label: '📋 Dán', role: 'paste' }));
-      menu.append(new MenuItem({ label: '✂️ Cắt', role: 'cut' }));
-      menu.append(new MenuItem({ label: '📝 Chọn tất cả', role: 'selectAll' }));
+      menu.append(new MenuItem({ label: "📋 Dán", role: "paste" }));
+      menu.append(new MenuItem({ label: "✂️ Cắt", role: "cut" }));
+      menu.append(new MenuItem({ label: "📝 Chọn tất cả", role: "selectAll" }));
     }
     if (params.linkURL) {
-      menu.append(new MenuItem({ type: 'separator' }));
-      menu.append(new MenuItem({ label: '🔗 Mở liên kết', click: () => shell.openExternal(params.linkURL) }));
-      menu.append(new MenuItem({ label: '📋 Sao chép liên kết', click: () => require('electron').clipboard.writeText(params.linkURL) }));
+      menu.append(new MenuItem({ type: "separator" }));
+      menu.append(
+        new MenuItem({
+          label: "🔗 Mở liên kết",
+          click: () => shell.openExternal(params.linkURL),
+        }),
+      );
+      menu.append(
+        new MenuItem({
+          label: "📋 Sao chép liên kết",
+          click: () => require("electron").clipboard.writeText(params.linkURL),
+        }),
+      );
     }
-    if (params.mediaType === 'image') {
-      menu.append(new MenuItem({ type: 'separator' }));
-      menu.append(new MenuItem({ label: '💾 Lưu ảnh', click: () => contents.downloadURL(params.srcURL) }));
+    if (params.mediaType === "image") {
+      menu.append(new MenuItem({ type: "separator" }));
+      menu.append(
+        new MenuItem({
+          label: "💾 Lưu ảnh",
+          click: () => contents.downloadURL(params.srcURL),
+        }),
+      );
     }
-    menu.append(new MenuItem({ type: 'separator' }));
-    menu.append(new MenuItem({ label: '🔄 Tải lại trang', click: () => contents.reload() }));
-    menu.append(new MenuItem({ label: '◀️ Quay lại', enabled: contents.canGoBack(), click: () => contents.goBack() }));
+    menu.append(new MenuItem({ type: "separator" }));
+    menu.append(
+      new MenuItem({
+        label: "🔄 Tải lại trang",
+        click: () => contents.reload(),
+      }),
+    );
+    menu.append(
+      new MenuItem({
+        label: "◀️ Quay lại",
+        enabled: contents.canGoBack(),
+        click: () => contents.goBack(),
+      }),
+    );
     if (menu.items.length > 0) menu.popup({ window: mainWindow });
   });
 
-  contents.on('did-finish-load', async () => {
-    const cssPath = path.join(__dirname, 'custom_style.css');
+  contents.on("did-finish-load", async () => {
+    const cssPath = path.join(__dirname, "custom_style.css");
     try {
-      const cssData = fs.readFileSync(cssPath, 'utf8');
+      const cssData = fs.readFileSync(cssPath, "utf8");
       contents.insertCSS(cssData);
-    } catch(e) {}
+    } catch (e) {}
   });
 
   const avatarInterval = setInterval(async () => {
@@ -401,18 +505,24 @@ function setupWebContents(contents, profileId) {
     try {
       const avatarUrl = await contents.executeJavaScript(avatarScript);
       if (avatarUrl && mainWindow && profileId) {
-        mainWindow.webContents.send('update-profile-avatar', { id: profileId, avatarUrl });
+        mainWindow.webContents.send("update-profile-avatar", {
+          id: profileId,
+          avatarUrl,
+        });
       } else {
-        const cookies = await contents.session.cookies.get({ name: 'c_user' });
+        const cookies = await contents.session.cookies.get({ name: "c_user" });
         if (cookies && cookies.length > 0) {
           const uid = cookies[0].value;
           const fbAvatar = `https://graph.facebook.com/${uid}/picture?width=150&height=150`;
           if (mainWindow && profileId) {
-            mainWindow.webContents.send('update-profile-avatar', { id: profileId, avatarUrl: fbAvatar });
+            mainWindow.webContents.send("update-profile-avatar", {
+              id: profileId,
+              avatarUrl: fbAvatar,
+            });
           }
         }
       }
-    } catch(e) {}
+    } catch (e) {}
   }, 5000);
 
   // ── Unread badge per profile ──
@@ -437,19 +547,30 @@ function setupWebContents(contents, profileId) {
         })();
       `);
       if (mainWindow && !mainWindow.isDestroyed() && profileId) {
-        mainWindow.webContents.send('update-profile-badge', { id: profileId, count: count || 0 });
+        mainWindow.webContents.send("update-profile-badge", {
+          id: profileId,
+          count: count || 0,
+        });
       }
-    } catch(e) {}
+    } catch (e) {}
   }, 3000);
 
   if (app.isPackaged) {
-    contents.on('before-input-event', (event, input) => {
-      if (input.key === 'F12' || (input.control && input.shift && input.key === 'I')) event.preventDefault();
+    contents.on("before-input-event", (event, input) => {
+      if (
+        input.key === "F12" ||
+        (input.control && input.shift && input.key === "I")
+      )
+        event.preventDefault();
     });
-    contents.on('devtools-opened', () => contents.closeDevTools());
+    contents.on("devtools-opened", () => contents.closeDevTools());
   } else {
-    contents.on('before-input-event', (event, input) => {
-      if (input.key === 'F12' || (input.control && input.shift && input.key === 'I')) contents.toggleDevTools();
+    contents.on("before-input-event", (event, input) => {
+      if (
+        input.key === "F12" ||
+        (input.control && input.shift && input.key === "I")
+      )
+        contents.toggleDevTools();
     });
   }
 }
@@ -467,9 +588,9 @@ function createWindow() {
     y: windowBounds.y,
     minWidth: 400,
     minHeight: 300,
-    title: 'Messenger',
-    icon: path.join(__dirname, 'icon.png'),
-    backgroundColor: settings.isDarkMode ? '#242526' : '#ffffff',
+    title: "Messenger",
+    icon: path.join(__dirname, "icon.png"),
+    backgroundColor: settings.isDarkMode ? "#242526" : "#ffffff",
     show: !settings.startMinimized,
     autoHideMenuBar: true,
     titleBarOverlay: false,
@@ -480,49 +601,79 @@ function createWindow() {
     },
   });
 
-  app.on('session-created', (sess) => {
+  app.on("session-created", (sess) => {
     // Setup download handler on every new session
     setupDownloadHandler(sess);
 
-    sess.webRequest.onBeforeRequest({ urls: ['*://*.facebook.com/*', '*://*.messenger.com/*'] }, (details, callback) => {
-      let cancel = false;
-      
-      // Chặn Đã xem (Block Seen)
-      if (settings.blockSeen) {
-        if (details.url.includes('/change_read_status.php') || details.url.includes('/ajax/mercury/change_read_status.php')) {
-          cancel = true;
-        }
-        if (details.uploadData && details.uploadData.length > 0) {
-          const body = details.uploadData[0].bytes ? details.uploadData[0].bytes.toString() : '';
-          if (body.includes('LSThreadMarkRead') || body.includes('markThreadRead') || body.includes('ThreadMarkReadMutation') || body.includes('"name":"mark_read"')) {
+    sess.webRequest.onBeforeRequest(
+      { urls: ["*://*.facebook.com/*", "*://*.messenger.com/*"] },
+      (details, callback) => {
+        let cancel = false;
+
+        // Chặn Đã xem (Block Seen)
+        if (settings.blockSeen) {
+          if (
+            details.url.includes("/change_read_status.php") ||
+            details.url.includes("/ajax/mercury/change_read_status.php")
+          ) {
             cancel = true;
           }
-        }
-      }
-
-      // Chặn Đang nhập (Block Typing)
-      if (settings.blockTyping) {
-        if (details.url.includes('/typ.php') || details.url.includes('/ajax/messaging/typ.php')) {
-          cancel = true;
-        }
-        if (details.uploadData && details.uploadData.length > 0) {
-          const body = details.uploadData[0].bytes ? details.uploadData[0].bytes.toString() : '';
-          if (body.includes('TypingIndicator') || body.includes('LSTypingIndicator') || body.includes('typing_indicator')) {
-            cancel = true;
+          if (details.uploadData && details.uploadData.length > 0) {
+            const body = details.uploadData[0].bytes
+              ? details.uploadData[0].bytes.toString()
+              : "";
+            if (
+              body.includes("LSThreadMarkRead") ||
+              body.includes("markThreadRead") ||
+              body.includes("ThreadMarkReadMutation") ||
+              body.includes('"name":"mark_read"')
+            ) {
+              cancel = true;
+            }
           }
         }
-      }
 
-      callback({ cancel });
-    });
+        // Chặn Đang nhập (Block Typing)
+        if (settings.blockTyping) {
+          if (
+            details.url.includes("/typ.php") ||
+            details.url.includes("/ajax/messaging/typ.php")
+          ) {
+            cancel = true;
+          }
+          if (details.uploadData && details.uploadData.length > 0) {
+            const body = details.uploadData[0].bytes
+              ? details.uploadData[0].bytes.toString()
+              : "";
+            if (
+              body.includes("TypingIndicator") ||
+              body.includes("LSTypingIndicator") ||
+              body.includes("typing_indicator")
+            ) {
+              cancel = true;
+            }
+          }
+        }
+
+        callback({ cancel });
+      },
+    );
 
     sess.setPermissionRequestHandler((webContents, permission, callback) => {
       const url = webContents.getURL();
-      const isFacebook = url.includes('facebook.com') || url.includes('messenger.com') || url.includes('fbcdn.net');
+      const isFacebook =
+        url.includes("facebook.com") ||
+        url.includes("messenger.com") ||
+        url.includes("fbcdn.net");
       if (isFacebook) {
         const allowedPermissions = [
-          'notifications', 'media', 'mediaKeySystem', 'microphone', 
-          'camera', 'clipboard-read', 'clipboard-sanitized-write',
+          "notifications",
+          "media",
+          "mediaKeySystem",
+          "microphone",
+          "camera",
+          "clipboard-read",
+          "clipboard-sanitized-write",
         ];
         if (allowedPermissions.includes(permission)) {
           callback(true);
@@ -533,36 +684,46 @@ function createWindow() {
     });
 
     sess.setPermissionCheckHandler((webContents, permission) => {
-      const url = webContents?.getURL() || '';
-      if (url.includes('facebook.com') || url.includes('messenger.com')) {
+      const url = webContents?.getURL() || "";
+      if (url.includes("facebook.com") || url.includes("messenger.com")) {
         return true;
       }
       return false;
     });
   });
 
-  mainWindow.loadFile('index.html');
+  mainWindow.loadFile("index.html");
 
   if (app.isPackaged) {
-    mainWindow.webContents.on('before-input-event', (event, input) => {
-      if (input.key === 'F12' || (input.control && input.shift && input.key === 'I')) event.preventDefault();
+    mainWindow.webContents.on("before-input-event", (event, input) => {
+      if (
+        input.key === "F12" ||
+        (input.control && input.shift && input.key === "I")
+      )
+        event.preventDefault();
     });
-    mainWindow.webContents.on('devtools-opened', () => mainWindow.webContents.closeDevTools());
+    mainWindow.webContents.on("devtools-opened", () =>
+      mainWindow.webContents.closeDevTools(),
+    );
   } else {
-    mainWindow.webContents.on('before-input-event', (event, input) => {
-      if (input.key === 'F12' || (input.control && input.shift && input.key === 'I')) mainWindow.webContents.toggleDevTools();
+    mainWindow.webContents.on("before-input-event", (event, input) => {
+      if (
+        input.key === "F12" ||
+        (input.control && input.shift && input.key === "I")
+      )
+        mainWindow.webContents.toggleDevTools();
     });
   }
 
-  mainWindow.on('focus', () => {
+  mainWindow.on("focus", () => {
     mainWindow.flashFrame(false);
   });
 
-  mainWindow.on('resize', updateBrowserViewBounds);
-  mainWindow.on('maximize', updateBrowserViewBounds);
-  mainWindow.on('unmaximize', updateBrowserViewBounds);
+  mainWindow.on("resize", updateBrowserViewBounds);
+  mainWindow.on("maximize", updateBrowserViewBounds);
+  mainWindow.on("unmaximize", updateBrowserViewBounds);
 
-  mainWindow.on('close', (event) => {
+  mainWindow.on("close", (event) => {
     if (!isQuitting && settings.minimizeToTray) {
       event.preventDefault();
       mainWindow.hide();
@@ -573,16 +734,16 @@ function createWindow() {
   });
 
   // IPC
-  ipcMain.on('switch-profile', (event, profile) => {
+  ipcMain.on("switch-profile", (event, profile) => {
     activeProfileId = profile.id;
     if (!browserViews[profile.id]) {
       const view = new BrowserView({
         webPreferences: {
           partition: profile.partition,
-          preload: path.join(__dirname, 'preload.js'),
+          preload: path.join(__dirname, "preload.js"),
           contextIsolation: true,
           nodeIntegration: false,
-        }
+        },
       });
       browserViews[profile.id] = view;
       setupWebContents(view.webContents, profile.id);
@@ -593,7 +754,7 @@ function createWindow() {
   });
 
   // ── Đăng xuất / Xóa session cho 1 profile ──
-  ipcMain.on('logout-profile', async (event, profileData) => {
+  ipcMain.on("logout-profile", async (event, profileData) => {
     const { id, partition } = profileData;
     try {
       // 1. Destroy BrowserView nếu đang tồn tại
@@ -608,7 +769,16 @@ function createWindow() {
       // 2. Xóa sạch cookies + cache + storage của partition
       const sess = session.fromPartition(partition);
       await sess.clearStorageData({
-        storages: ['cookies', 'localstorage', 'sessionstorage', 'cachestorage', 'indexdb', 'shadercache', 'websql', 'serviceworkers'],
+        storages: [
+          "cookies",
+          "localstorage",
+          "sessionstorage",
+          "cachestorage",
+          "indexdb",
+          "shadercache",
+          "websql",
+          "serviceworkers",
+        ],
       });
       await sess.clearCache();
       await sess.clearAuthCache();
@@ -617,10 +787,10 @@ function createWindow() {
       const view = new BrowserView({
         webPreferences: {
           partition: partition,
-          preload: path.join(__dirname, 'preload.js'),
+          preload: path.join(__dirname, "preload.js"),
           contextIsolation: true,
           nodeIntegration: false,
-        }
+        },
       });
       browserViews[id] = view;
       setupWebContents(view.webContents, id);
@@ -632,24 +802,37 @@ function createWindow() {
         updateBrowserViewBounds();
       }
 
-      event.reply('logout-profile-done', { id, success: true });
+      event.reply("logout-profile-done", { id, success: true });
     } catch (err) {
-      event.reply('logout-profile-done', { id, success: false, error: err.message });
+      event.reply("logout-profile-done", {
+        id,
+        success: false,
+        error: err.message,
+      });
     }
   });
 
   // ── Xóa session sạch khi tạo profile mới (đảm bảo không dùng lại cookie cũ) ──
-  ipcMain.on('clear-new-profile-session', async (event, partition) => {
+  ipcMain.on("clear-new-profile-session", async (event, partition) => {
     try {
       const sess = session.fromPartition(partition);
       await sess.clearStorageData({
-        storages: ['cookies', 'localstorage', 'sessionstorage', 'cachestorage', 'indexdb', 'shadercache', 'websql', 'serviceworkers'],
+        storages: [
+          "cookies",
+          "localstorage",
+          "sessionstorage",
+          "cachestorage",
+          "indexdb",
+          "shadercache",
+          "websql",
+          "serviceworkers",
+        ],
       });
       await sess.clearCache();
     } catch (err) {}
   });
 
-  ipcMain.on('set-browserview-visibility', (event, visible) => {
+  ipcMain.on("set-browserview-visibility", (event, visible) => {
     if (!mainWindow) return;
     if (visible && activeProfileId && browserViews[activeProfileId]) {
       mainWindow.setBrowserView(browserViews[activeProfileId]);
@@ -659,14 +842,14 @@ function createWindow() {
     }
   });
 
-  ipcMain.on('delete-profile', (event, id) => {
+  ipcMain.on("delete-profile", (event, id) => {
     if (browserViews[id]) {
       browserViews[id].webContents.destroy();
       delete browserViews[id];
     }
   });
 
-  ipcMain.on('update-badge', (event, count) => {
+  ipcMain.on("update-badge", (event, count) => {
     if (count !== unreadCount) {
       const hadNewMessages = count > unreadCount;
       unreadCount = count;
@@ -677,57 +860,59 @@ function createWindow() {
     }
   });
 
-  ipcMain.on('set-theme', (event, isDark) => {
+  ipcMain.on("set-theme", (event, isDark) => {
     settings.isDarkMode = isDark;
     saveSettings(settings);
-    nativeTheme.themeSource = isDark ? 'dark' : 'light';
+    nativeTheme.themeSource = isDark ? "dark" : "light";
   });
 
-  ipcMain.on('toggle-always-on-top', () => {
+  ipcMain.on("toggle-always-on-top", () => {
     settings.alwaysOnTop = !settings.alwaysOnTop;
     mainWindow.setAlwaysOnTop(settings.alwaysOnTop);
     saveSettings(settings);
   });
 
-  ipcMain.on('toggle-fullscreen', () => {
+  ipcMain.on("toggle-fullscreen", () => {
     mainWindow.setFullScreen(!mainWindow.isFullScreen());
     setTimeout(updateBrowserViewBounds, 100);
   });
 
-  ipcMain.on('zoom-in', () => {
+  ipcMain.on("zoom-in", () => {
     if (activeProfileId && browserViews[activeProfileId]) {
       const wc = browserViews[activeProfileId].webContents;
       wc.setZoomLevel(wc.getZoomLevel() + 0.5);
     }
   });
 
-  ipcMain.on('zoom-out', () => {
+  ipcMain.on("zoom-out", () => {
     if (activeProfileId && browserViews[activeProfileId]) {
       const wc = browserViews[activeProfileId].webContents;
       wc.setZoomLevel(wc.getZoomLevel() - 0.5);
     }
   });
 
-  ipcMain.on('reload-page', () => {
+  ipcMain.on("reload-page", () => {
     if (activeProfileId && browserViews[activeProfileId]) {
       browserViews[activeProfileId].webContents.reload();
     }
   });
 
-  ipcMain.on('go-home', () => {
+  ipcMain.on("go-home", () => {
     if (activeProfileId && browserViews[activeProfileId]) {
-      browserViews[activeProfileId].webContents.loadURL(MESSENGER_URL, { userAgent: USER_AGENT });
+      browserViews[activeProfileId].webContents.loadURL(MESSENGER_URL, {
+        userAgent: USER_AGENT,
+      });
     }
   });
 
-  ipcMain.on('go-back', () => {
+  ipcMain.on("go-back", () => {
     if (activeProfileId && browserViews[activeProfileId]) {
       const wc = browserViews[activeProfileId].webContents;
       if (wc.canGoBack()) wc.goBack();
     }
   });
 
-  ipcMain.on('get-settings', (event) => {
+  ipcMain.on("get-settings", (event) => {
     event.returnValue = {
       isDarkMode: settings.isDarkMode,
       alwaysOnTop: settings.alwaysOnTop,
@@ -737,14 +922,14 @@ function createWindow() {
     };
   });
 
-  ipcMain.on('save-lock-settings', (event, data) => {
+  ipcMain.on("save-lock-settings", (event, data) => {
     if (data.enabled !== undefined) settings.appLockEnabled = data.enabled;
     if (data.hash !== undefined) settings.appLockHash = data.hash;
     if (data.timeout !== undefined) settings.appLockTimeout = data.timeout;
     saveSettings(settings);
   });
 
-  ipcMain.on('get-lock-settings', (event) => {
+  ipcMain.on("get-lock-settings", (event) => {
     event.returnValue = {
       enabled: settings.appLockEnabled,
       hash: settings.appLockHash,
@@ -753,21 +938,21 @@ function createWindow() {
   });
 
   // ── Download IPC handlers ──
-  ipcMain.on('open-download-file', (event, filePath) => {
+  ipcMain.on("open-download-file", (event, filePath) => {
     if (filePath && fs.existsSync(filePath)) {
       shell.openPath(filePath);
     }
   });
 
-  ipcMain.on('open-download-folder', (event, filePath) => {
+  ipcMain.on("open-download-folder", (event, filePath) => {
     if (filePath && fs.existsSync(filePath)) {
       shell.showItemInFolder(filePath);
     } else {
-      shell.openPath(app.getPath('downloads'));
+      shell.openPath(app.getPath("downloads"));
     }
   });
 
-  ipcMain.on('cancel-download', (event, id) => {
+  ipcMain.on("cancel-download", (event, id) => {
     const dl = activeDownloads.get(id);
     if (dl && dl.item) {
       dl.item.cancel();
@@ -781,19 +966,26 @@ function createWindow() {
 // ============================================================
 function updateBadge(count) {
   if (!mainWindow) return;
-  if (process.platform === 'win32') {
+  if (process.platform === "win32") {
     if (count > 0) {
       try {
-        mainWindow.setOverlayIcon(createBadgeIcon(count), `${count} tin nhắn chưa đọc`);
+        mainWindow.setOverlayIcon(
+          createBadgeIcon(count),
+          `${count} tin nhắn chưa đọc`,
+        );
       } catch {
-        mainWindow.setOverlayIcon(null, '');
+        mainWindow.setOverlayIcon(null, "");
       }
     } else {
-      mainWindow.setOverlayIcon(null, '');
+      mainWindow.setOverlayIcon(null, "");
     }
+  } else if (process.platform === "darwin") {
+    app.dock.setBadge(count > 0 ? String(count) : "");
   }
   if (tray) {
-    tray.setToolTip(count > 0 ? `Messenger — ${count} tin nhắn chưa đọc` : 'Messlỏ');
+    tray.setToolTip(
+      count > 0 ? `Messenger — ${count} tin nhắn chưa đọc` : "Messlỏ",
+    );
   }
 }
 
@@ -801,7 +993,7 @@ function updateBadge(count) {
 //  ĐĂNG KÝ PHÍM TẮT
 // ============================================================
 function registerGlobalShortcuts() {
-  const hotkey = settings.globalHotkey || 'Ctrl+Shift+M';
+  const hotkey = settings.globalHotkey || "Ctrl+Shift+M";
   try {
     globalShortcut.register(hotkey, () => {
       if (!mainWindow) return;
@@ -820,7 +1012,7 @@ function registerGlobalShortcuts() {
 // ============================================================
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
-  nativeTheme.themeSource = settings.isDarkMode ? 'dark' : 'light';
+  nativeTheme.themeSource = settings.isDarkMode ? "dark" : "light";
   createWindow();
   createTray();
   registerGlobalShortcuts();
@@ -829,34 +1021,55 @@ app.whenReady().then(() => {
   // --- KIỂM TRA DONATE TRƯỚC KHI MỞ TRANG (HWID-based) ---
   (async () => {
     try {
-      const { execSync } = require('child_process');
-      const https = require('https');
+      const { execSync } = require("child_process");
+      const https = require("https");
 
       // Bước 0: Lấy HWID máy hiện tại
-      let hwid = 'UNKNOWN';
-      try {
-        hwid = execSync('wmic csproduct get UUID', { encoding: 'utf8' })
-          .split('\n').map(l => l.trim()).filter(l => l && l !== 'UUID')[0] || '';
-      } catch {}
-      if (!hwid || hwid === 'UNKNOWN') {
+      let hwid = "UNKNOWN";
+      if (process.platform === "darwin") {
         try {
-          hwid = execSync('reg query "HKLM\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid', { encoding: 'utf8' })
-            .match(/REG_SZ\s+(.+)/)?.[1]?.trim() || 'UNKNOWN';
+          const ioregOutput = execSync("ioreg -rd1 -c IOPlatformExpertDevice", {
+            encoding: "utf8",
+          });
+          const match = ioregOutput.match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
+          if (match) hwid = match[1];
         } catch {}
+      } else if (process.platform === "win32") {
+        try {
+          hwid =
+            execSync("wmic csproduct get UUID", { encoding: "utf8" })
+              .split("\n")
+              .map((l) => l.trim())
+              .filter((l) => l && l !== "UUID")[0] || "";
+        } catch {}
+        if (!hwid || hwid === "UNKNOWN") {
+          try {
+            hwid =
+              execSync(
+                'reg query "HKLM\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid',
+                { encoding: "utf8" },
+              )
+                .match(/REG_SZ\s+(.+)/)?.[1]
+                ?.trim() || "UNKNOWN";
+          } catch {}
+        }
       }
 
-      if (!hwid || hwid === 'UNKNOWN') {
-        shell.openExternal('https://d.truong.it/donate');
+      if (!hwid || hwid === "UNKNOWN") {
+        shell.openExternal("https://d.truong.it/donate");
         return;
       }
 
       // Bước 1: Kiểm tra cache local (tránh gọi API mỗi lần mở app)
-      const donateStatusFile = path.join(app.getPath('userData'), 'donate_status.json');
+      const donateStatusFile = path.join(
+        app.getPath("userData"),
+        "donate_status.json",
+      );
       let shouldShowDonate = true;
 
       try {
         if (fs.existsSync(donateStatusFile)) {
-          const cache = JSON.parse(fs.readFileSync(donateStatusFile, 'utf8'));
+          const cache = JSON.parse(fs.readFileSync(donateStatusFile, "utf8"));
           if (cache.hwid === hwid && cache.donated === true) {
             shouldShowDonate = false;
           }
@@ -868,20 +1081,38 @@ app.whenReady().then(() => {
         try {
           const apiResult = await new Promise((resolve, reject) => {
             const url = `https://donate-api.truong-it.workers.dev/hwid/check?id=${encodeURIComponent(hwid)}`;
-            https.get(url, { timeout: 5000 }, (res) => {
-              let data = '';
-              res.on('data', chunk => data += chunk);
-              res.on('end', () => {
-                try { resolve(JSON.parse(data)); } catch { resolve(null); }
+            https
+              .get(url, { timeout: 5000 }, (res) => {
+                let data = "";
+                res.on("data", (chunk) => (data += chunk));
+                res.on("end", () => {
+                  try {
+                    resolve(JSON.parse(data));
+                  } catch {
+                    resolve(null);
+                  }
+                });
+              })
+              .on("error", reject)
+              .on("timeout", function () {
+                this.destroy();
+                reject(new Error("timeout"));
               });
-            }).on('error', reject).on('timeout', function() { this.destroy(); reject(new Error('timeout')); });
           });
 
           if (apiResult && apiResult.donated === true) {
             shouldShowDonate = false;
             // Cache kết quả để lần sau không cần gọi API
-            const cacheData = { hwid, donated: true, checked_at: new Date().toISOString() };
-            fs.writeFileSync(donateStatusFile, JSON.stringify(cacheData), 'utf8');
+            const cacheData = {
+              hwid,
+              donated: true,
+              checked_at: new Date().toISOString(),
+            };
+            fs.writeFileSync(
+              donateStatusFile,
+              JSON.stringify(cacheData),
+              "utf8",
+            );
           }
         } catch {
           // API lỗi → vẫn hiện donate (an toàn)
@@ -889,15 +1120,17 @@ app.whenReady().then(() => {
       }
 
       if (shouldShowDonate) {
-        shell.openExternal(`https://d.truong.it/donate?hwid=${encodeURIComponent(hwid)}`);
+        shell.openExternal(
+          `https://d.truong.it/donate?hwid=${encodeURIComponent(hwid)}`,
+        );
       }
     } catch {
       // Fallback: mở donate bình thường nếu có lỗi bất kỳ
-      shell.openExternal('https://d.truong.it/donate');
+      shell.openExternal("https://d.truong.it/donate");
     }
   })();
 
-  app.on('second-instance', () => {
+  app.on("second-instance", () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
@@ -905,7 +1138,7 @@ app.whenReady().then(() => {
     }
   });
 
-  app.on('activate', () => {
+  app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
@@ -913,7 +1146,7 @@ app.whenReady().then(() => {
 // ============================================================
 //  XỬ LÝ THOÁT
 // ============================================================
-app.on('before-quit', () => {
+app.on("before-quit", () => {
   isQuitting = true;
   if (mainWindow) {
     settings.windowBounds = mainWindow.getBounds();
@@ -921,11 +1154,10 @@ app.on('before-quit', () => {
   }
 });
 
-app.on('will-quit', () => {
+app.on("will-quit", () => {
   globalShortcut.unregisterAll();
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
 });
-
