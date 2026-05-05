@@ -1,12 +1,10 @@
-# Messlỏ (macOS)
+# Mosx
 
 <p align="center">
-  <img src="icon.png" width="64" height="64" alt="Messlỏ" />
+  <img src="icon.png" width="64" height="64" alt="Mosx" />
 </p>
 
 Ứng dụng quản lý Messenger đa tài khoản (Multi-Account) cho macOS — xây dựng trên Electron + Chromium.
-
-> Forked from [nct88/Messenger-Win](https://github.com/nct88/Messenger-Win), adapted for macOS with pnpm.
 
 ---
 

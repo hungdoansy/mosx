@@ -1,7 +1,6 @@
 // ============================================================
-//  Messlỏ — Ứng dụng Messenger Desktop cho Windows
-//  Nhân: Chromium (Google Chrome)
-//  Tác giả: TruongIT
+//  Mosx — Ứng dụng Messenger Desktop đa tài khoản cho macOS
+//  Nhân: Chromium (Electron)
 // ============================================================
 
 const {
@@ -33,7 +32,7 @@ let downloadCounter = 0;
 //  CẤU HÌNH CHUNG
 // ============================================================
 const MESSENGER_URL = "https://www.facebook.com/messages";
-const APP_ID = "com.messenger.premium";
+const APP_ID = "com.mosx.app";
 const USER_AGENT =
   process.platform === "darwin"
     ? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
@@ -136,7 +135,7 @@ function createTray() {
   }
   tray = new Tray(trayIcon);
   updateTrayMenu();
-  tray.setToolTip("Messlỏ");
+  tray.setToolTip("Mosx");
 
   tray.on("click", () => {
     if (!mainWindow) return;
@@ -983,9 +982,7 @@ function updateBadge(count) {
     app.dock.setBadge(count > 0 ? String(count) : "");
   }
   if (tray) {
-    tray.setToolTip(
-      count > 0 ? `Messenger — ${count} tin nhắn chưa đọc` : "Messlỏ",
-    );
+    tray.setToolTip(count > 0 ? `Mosx — ${count} tin nhắn chưa đọc` : "Mosx");
   }
 }
 
@@ -1017,118 +1014,6 @@ app.whenReady().then(() => {
   createTray();
   registerGlobalShortcuts();
   setupAutoUpdater();
-
-  // --- KIỂM TRA DONATE TRƯỚC KHI MỞ TRANG (HWID-based) ---
-  (async () => {
-    try {
-      const { execSync } = require("child_process");
-      const https = require("https");
-
-      // Bước 0: Lấy HWID máy hiện tại
-      let hwid = "UNKNOWN";
-      if (process.platform === "darwin") {
-        try {
-          const ioregOutput = execSync("ioreg -rd1 -c IOPlatformExpertDevice", {
-            encoding: "utf8",
-          });
-          const match = ioregOutput.match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
-          if (match) hwid = match[1];
-        } catch {}
-      } else if (process.platform === "win32") {
-        try {
-          hwid =
-            execSync("wmic csproduct get UUID", { encoding: "utf8" })
-              .split("\n")
-              .map((l) => l.trim())
-              .filter((l) => l && l !== "UUID")[0] || "";
-        } catch {}
-        if (!hwid || hwid === "UNKNOWN") {
-          try {
-            hwid =
-              execSync(
-                'reg query "HKLM\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid',
-                { encoding: "utf8" },
-              )
-                .match(/REG_SZ\s+(.+)/)?.[1]
-                ?.trim() || "UNKNOWN";
-          } catch {}
-        }
-      }
-
-      if (!hwid || hwid === "UNKNOWN") {
-        shell.openExternal("https://d.truong.it/donate");
-        return;
-      }
-
-      // Bước 1: Kiểm tra cache local (tránh gọi API mỗi lần mở app)
-      const donateStatusFile = path.join(
-        app.getPath("userData"),
-        "donate_status.json",
-      );
-      let shouldShowDonate = true;
-
-      try {
-        if (fs.existsSync(donateStatusFile)) {
-          const cache = JSON.parse(fs.readFileSync(donateStatusFile, "utf8"));
-          if (cache.hwid === hwid && cache.donated === true) {
-            shouldShowDonate = false;
-          }
-        }
-      } catch {}
-
-      // Bước 2: Nếu chưa có cache → kiểm tra API
-      if (shouldShowDonate) {
-        try {
-          const apiResult = await new Promise((resolve, reject) => {
-            const url = `https://donate-api.truong-it.workers.dev/hwid/check?id=${encodeURIComponent(hwid)}`;
-            https
-              .get(url, { timeout: 5000 }, (res) => {
-                let data = "";
-                res.on("data", (chunk) => (data += chunk));
-                res.on("end", () => {
-                  try {
-                    resolve(JSON.parse(data));
-                  } catch {
-                    resolve(null);
-                  }
-                });
-              })
-              .on("error", reject)
-              .on("timeout", function () {
-                this.destroy();
-                reject(new Error("timeout"));
-              });
-          });
-
-          if (apiResult && apiResult.donated === true) {
-            shouldShowDonate = false;
-            // Cache kết quả để lần sau không cần gọi API
-            const cacheData = {
-              hwid,
-              donated: true,
-              checked_at: new Date().toISOString(),
-            };
-            fs.writeFileSync(
-              donateStatusFile,
-              JSON.stringify(cacheData),
-              "utf8",
-            );
-          }
-        } catch {
-          // API lỗi → vẫn hiện donate (an toàn)
-        }
-      }
-
-      if (shouldShowDonate) {
-        shell.openExternal(
-          `https://d.truong.it/donate?hwid=${encodeURIComponent(hwid)}`,
-        );
-      }
-    } catch {
-      // Fallback: mở donate bình thường nếu có lỗi bất kỳ
-      shell.openExternal("https://d.truong.it/donate");
-    }
-  })();
 
   app.on("second-instance", () => {
     if (mainWindow) {

@@ -1,7 +1,7 @@
 {
-  "name": "messenger-premium",
+  "name": "mosx",
   "version": "1.3.0",
-  "description": "Ứng dụng Messenger Desktop cho Windows - Chạy trên nhân Chrome (Chromium)",
+  "description": "Ứng dụng Messenger Desktop đa tài khoản cho macOS - Electron + Chromium",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -9,8 +9,8 @@
     "build:dmg": "electron-builder --mac dmg"
   },
   "build": {
-    "appId": "com.messenger.premium",
-    "productName": "Messlỏ",
+    "appId": "com.mosx.app",
+    "productName": "Mosx",
     "directories": {
       "output": "dist"
     },
@@ -20,7 +20,7 @@
       ],
       "icon": "icon.icns",
       "category": "public.app-category.social-networking",
-      "artifactName": "Messlo-${version}-mac.${ext}"
+      "artifactName": "Mosx-${version}-mac.${ext}"
     },
     "files": [
       "main.js",
@@ -36,8 +36,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "nct88",
-        "repo": "Messenger-Win"
+        "owner": "hungdoansy",
+        "repo": "mosx"
       }
     ]
   },
@@ -45,9 +45,11 @@
     "messenger",
     "facebook",
     "desktop",
-    "electron"
+    "electron",
+    "macos",
+    "multi-account"
   ],
-  "author": "TruongIT",
+  "author": "hungdoansy",
   "license": "MIT",
   "devDependencies": {
     "electron": "29.4.6",
