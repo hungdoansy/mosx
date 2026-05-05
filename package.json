@@ -18,7 +18,7 @@
       "target": [
         "dmg"
       ],
-      "icon": "icon.png",
+      "icon": "icon.icns",
       "category": "public.app-category.social-networking",
       "artifactName": "Messlo-${version}-mac.${ext}"
     },
@@ -29,6 +29,7 @@
       "index.html",
       "custom_style.css",
       "icon.ico",
+      "icon.icns",
       "icon.png",
       "package.json"
     ],
