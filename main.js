@@ -1225,7 +1225,13 @@ function setupAppMenu() {
     { role: "editMenu" },
     {
       label: "Cửa sổ",
-      submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "front" }],
+      submenu: [
+        { role: "minimize" },
+        // Cmd+W closes (hides) the window; the app keeps running in the dock.
+        { role: "close", label: "Đóng cửa sổ" },
+        { role: "zoom" },
+        { role: "front" },
+      ],
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -1248,7 +1254,15 @@ app.whenReady().then(() => {
   });
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    // Clicking the dock icon re-opens the app. If the window was hidden
+    // (Cmd+W / red button / minimize-to-tray) it still exists, so show and
+    // focus it; only recreate when it was genuinely destroyed.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+    } else {
+      createWindow();
+    }
   });
 });
 
