@@ -1,12 +1,27 @@
+<div align="center">
+
+<img src="icon.png" width="72" height="72" alt="Messy" />
+
 # Messy
 
-<p align="center">
-  <img src="icon.png" width="64" height="64" alt="Messy" />
-</p>
+**A multi-account Messenger manager for macOS — built on Electron + Chromium.**
 
-A multi-account Messenger manager for macOS — built on Electron + Chromium.
+macOS · Apple Silicon (arm64) only
+
+</div>
 
 ---
+
+## Credits
+
+Messy is a **macOS fork** of
+[nct88/Messenger-Win](https://github.com/nct88/Messenger-Win) (since renamed to
+[nct88/MessengerMulti-Windows](https://github.com/nct88/MessengerMulti-Windows)),
+built **specifically for macOS on Apple Silicon (Apple M chips)**. It was forked
+at v1.3.0 and then substantially rewritten for macOS with a hardened security
+model (Electron 43, `WebContentsView`, a strict origin trust boundary, sandboxed
+per-account partitions, and a scrypt-based app lock). Thanks to the original
+author for the upstream project.
 
 ## Features
 
@@ -20,8 +35,9 @@ A multi-account Messenger manager for macOS — built on Electron + Chromium.
 
 ## Requirements
 
+- **macOS on Apple Silicon (Apple M chips)** — Messy builds and ships for `arm64` only.
 - [Node.js](https://nodejs.org/) v24+
-- [pnpm](https://pnpm.io/) v9.15+
+- [pnpm](https://pnpm.io/) v11+
 
 ## Install & Run
 
@@ -66,24 +82,45 @@ The app enables the **hardened runtime** with entitlements in
 > signing with a real Developer ID, electron-builder signs over this ad-hoc
 > signature.
 
+## Releasing
+
+Releases are produced by the **Apple-Silicon-only** GitHub Actions workflow at
+[`.github/workflows/release.yml`](.github/workflows/release.yml). Trigger it
+manually (**Actions → Release → Run workflow**) with a `X.Y.Z` version; it
+builds the `arm64` `.dmg`, generates release notes, and publishes a GitHub
+Release whose assets feed `electron-updater` auto-update.
+
+The workflow signs **and** notarizes when the signing secrets are present, and
+otherwise falls back to an ad-hoc (locally-runnable, non-distributable) build —
+it never fails purely for missing secrets.
+
+**Repository secrets** (add under **Settings → Secrets and variables →
+Actions**):
+
+| Secret | Purpose | Required for |
+| ------ | ------- | ------------ |
+| `GEMINI_API_KEY`     | Rewrites the commit log into user-facing release notes. Omit to fall back to a raw commit list. | Nicer changelog (optional) |
+| `CSC_LINK`           | Base64-encoded Developer ID Application certificate (`.p12`). | Signed release |
+| `CSC_KEY_PASSWORD`   | Password for the `.p12` certificate. | Signed release |
+| `APPLE_API_KEY`      | Base64-encoded App Store Connect API key (`.p8`); the workflow decodes it to a file. | Notarization |
+| `APPLE_API_KEY_ID`   | App Store Connect API key ID. | Notarization |
+| `APPLE_API_ISSUER`   | App Store Connect issuer ID. | Notarization |
+
+Without the signing secrets the workflow still produces a runnable ad-hoc
+`.dmg`; add them to enable Gatekeeper-clean distribution and auto-update.
+
 ## Project structure
 
-| File               | Purpose                                                     |
-| ------------------ | ----------------------------------------------------------- |
-| `main.js`          | App lifecycle, partitions, WebContentsView, and IPC.        |
-| `renderer.js`      | Multi-account sidebar logic and the modal UI.               |
-| `index.html`       | Left sidebar (accounts), right sidebar (tools), and modals. |
-| `preload.js`       | Secure bridge between the DOM and the backend.              |
-| `custom_style.css` | Dark-glass styling and hiding Facebook's ads.               |
-
-## Credits
-
-Messy is a macOS fork of [nct88/Messenger-Win](https://github.com/nct88/Messenger-Win)
-(since renamed to [nct88/MessengerMulti-Windows](https://github.com/nct88/MessengerMulti-Windows)).
-It was forked at v1.3.0 and then substantially rewritten for macOS with a
-hardened security model (Electron 43, `WebContentsView`, a strict origin trust
-boundary, sandboxed per-account partitions, and a scrypt-based app lock).
-Thanks to the original author for the upstream project.
+| File                          | Purpose                                                              |
+| ----------------------------- | ------------------------------------------------------------------- |
+| `main.js`                     | App lifecycle, partitions, WebContentsView, and IPC.                |
+| `trust.js`                    | Pure origin trust boundary — parses URLs and matches the hostname against an allowlist (unit-tested). |
+| `preload.js`                  | Secure bridge between the DOM and the backend.                      |
+| `renderer.js`                 | Multi-account sidebar logic and the modal UI.                       |
+| `index.html`                  | Left sidebar (accounts), right sidebar (tools), and modals.         |
+| `custom_style.css`            | Dark-glass styling and hiding Facebook's ads.                       |
+| `build/entitlements.mac.plist`| Hardened-runtime entitlements for the macOS build.                  |
+| `test/`                       | Unit tests (`node --test`) — e.g. `trust.test.js` for the trust boundary. |
 
 ## License
 
