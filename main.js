@@ -201,6 +201,10 @@ let settings = loadSettings();
 let isQuitting = false;
 let unreadCount = 0;
 
+// App-lock brute-force throttle (main-side, authoritative).
+let pinFailCount = 0;
+let pinLockUntil = 0;
+
 let browserViews = {}; // { profileId: WebContentsView }
 let attachedView = null; // the WebContentsView currently shown
 let activeProfileId = null;
@@ -537,6 +541,20 @@ function setupWebContents(contents, profileId) {
   };
   contents.on("will-navigate", blockUntrustedNav);
   contents.on("will-redirect", blockUntrustedNav);
+
+  // A popup opened via the allowed window-open path gets a fresh webContents
+  // that would otherwise bypass the navigation allowlist. Apply the same
+  // guards (recursively, since the popup can spawn its own popups).
+  contents.on("did-create-window", (childWindow) => {
+    const wc = childWindow.webContents;
+    wc.setWindowOpenHandler(({ url }) => {
+      if (isTrusted(url)) return { action: "allow" };
+      safeOpenExternal(url);
+      return { action: "deny" };
+    });
+    wc.on("will-navigate", blockUntrustedNav);
+    wc.on("will-redirect", blockUntrustedNav);
+  });
 
   contents.on("context-menu", (event, params) => {
     const menu = new Menu();
@@ -1085,22 +1103,34 @@ function createWindow() {
 
   ipcMain.handle("applock:verify", (event, pin) => {
     if (!isShellSender(event)) return false;
+    if (Date.now() < pinLockUntil) return false; // in cooldown
     const ok = verifyPinHash(String(pin ?? ""), settings.appLockHash);
-    // Transparently upgrade a legacy sha256 hash to scrypt on success.
-    if (ok && settings.appLockHash && !settings.appLockHash.startsWith("scrypt$")) {
-      settings.appLockHash = makePinHash(String(pin));
-      saveSettings(settings);
+    if (ok) {
+      pinFailCount = 0;
+      // Transparently upgrade a legacy sha256 hash to scrypt on success.
+      if (settings.appLockHash && !settings.appLockHash.startsWith("scrypt$")) {
+        settings.appLockHash = makePinHash(String(pin));
+        saveSettings(settings);
+      }
+    } else {
+      pinFailCount++;
+      if (pinFailCount >= 10) {
+        pinLockUntil = Date.now() + 30000; // 30s lockout after 10 fails
+        pinFailCount = 0;
+      }
     }
     return ok;
   });
 
-  ipcMain.on("applock:disable", () => {
+  ipcMain.on("applock:disable", (event) => {
+    if (!isShellSender(event)) return;
     settings.appLockEnabled = false;
     settings.appLockHash = "";
     saveSettings(settings);
   });
 
   ipcMain.on("applock:set-timeout", (event, minutes) => {
+    if (!isShellSender(event)) return;
     const m = parseInt(minutes, 10);
     if (Number.isFinite(m) && m >= 0) {
       settings.appLockTimeout = m;
