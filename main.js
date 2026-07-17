@@ -1,6 +1,6 @@
 // ============================================================
-//  Mosx — Ứng dụng Messenger Desktop đa tài khoản cho macOS
-//  Nhân: Chromium (Electron)
+//  Messy — Multi-account Messenger desktop app for macOS
+//  Engine: Chromium (Electron)
 // ============================================================
 
 const {
@@ -24,22 +24,22 @@ const fs = require("fs");
 const crypto = require("crypto");
 
 // ============================================================
-//  HỆ THỐNG DOWNLOAD
+//  DOWNLOAD SYSTEM
 // ============================================================
 let activeDownloads = new Map(); // id -> { item, filename, savePath, received, total }
 let completedDownloads = new Map(); // id -> sanitized absolute savePath (open-by-id)
 let downloadCounter = 0;
 
 // ============================================================
-//  CẤU HÌNH CHUNG
+//  GENERAL CONFIG
 // ============================================================
 const MESSENGER_URL = "https://www.facebook.com/messages";
-const APP_ID = "com.mosx.app";
+const APP_ID = "com.messy.app";
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 
 // ============================================================
-//  CHỐNG CHẠY TRÙNG LẶP (Single Instance Lock)
+//  SINGLE INSTANCE LOCK
 // ============================================================
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -47,7 +47,42 @@ if (!gotTheLock) {
 }
 
 // ============================================================
-//  HỆ THỐNG LƯU CÀI ĐẶT
+//  USERDATA MIGRATION (legacy app name -> Messy)
+//  Electron derives the userData directory name from the app's
+//  product name, so renaming the app would orphan an existing
+//  user's profiles, sessions, and settings. On the first launch
+//  under the new name, if the new userData dir is still empty,
+//  copy over the most recent legacy directory. The old directory
+//  is left intact as a rollback safety net. Best-effort: on any
+//  failure the app simply starts with default settings.
+// ============================================================
+function migrateLegacyUserData() {
+  try {
+    const appDataDir = app.getPath("appData");
+    const newDir = app.getPath("userData");
+
+    // Already have data under the new name -> nothing to migrate.
+    if (fs.existsSync(path.join(newDir, "settings.json"))) return;
+    if (fs.existsSync(newDir) && fs.readdirSync(newDir).length > 0) return;
+
+    // Prior product names this app has shipped under, newest first.
+    const LEGACY_NAMES = ["Mosx", "Messlỏ"];
+    for (const name of LEGACY_NAMES) {
+      const oldDir = path.join(appDataDir, name);
+      if (oldDir === newDir) continue;
+      if (fs.existsSync(oldDir) && fs.readdirSync(oldDir).length > 0) {
+        fs.cpSync(oldDir, newDir, { recursive: true, errorOnExist: false });
+        return;
+      }
+    }
+  } catch {
+    // Migration is best-effort; app still launches on defaults.
+  }
+}
+migrateLegacyUserData();
+
+// ============================================================
+//  SETTINGS PERSISTENCE
 // ============================================================
 const SETTINGS_PATH = path.join(app.getPath("userData"), "settings.json");
 
@@ -91,7 +126,7 @@ function saveSettings(data) {
 function legacyPinHash(pin) {
   return crypto
     .createHash("sha256")
-    .update(pin + "_mosx_salt_2026")
+    .update(pin + "_messy_salt_2026")
     .digest("hex");
 }
 
@@ -193,7 +228,7 @@ function containedInDownloads(p) {
 }
 
 // ============================================================
-//  BIẾN TOÀN CỤC
+//  GLOBAL STATE
 // ============================================================
 let mainWindow = null;
 let tray = null;
@@ -210,7 +245,7 @@ let attachedView = null; // the WebContentsView currently shown
 let activeProfileId = null;
 
 // ============================================================
-//  TẠO SYSTEM TRAY
+//  SYSTEM TRAY
 // ============================================================
 function createTray() {
   const iconPath = path.join(__dirname, "icon.png");
@@ -224,7 +259,7 @@ function createTray() {
   }
   tray = new Tray(trayIcon);
   updateTrayMenu();
-  tray.setToolTip("Mosx");
+  tray.setToolTip("Messy");
 
   tray.on("click", () => {
     if (!mainWindow) return;
@@ -247,7 +282,7 @@ function updateTrayMenu() {
   if (!tray) return;
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: "💬 Mở Messenger",
+      label: "💬 Open Messenger",
       click: () => {
         mainWindow.show();
         mainWindow.focus();
@@ -255,7 +290,7 @@ function updateTrayMenu() {
     },
     { type: "separator" },
     {
-      label: "🔄 Tải lại trang",
+      label: "🔄 Reload page",
       click: () => {
         if (activeProfileId && browserViews[activeProfileId]) {
           browserViews[activeProfileId].webContents.reload();
@@ -263,13 +298,13 @@ function updateTrayMenu() {
       },
     },
     {
-      label: "🚀 Khởi động cùng macOS",
+      label: "🚀 Launch at login",
       type: "checkbox",
       checked: settings.autoLaunch,
       click: (item) => toggleAutoLaunch(item.checked),
     },
     {
-      label: "📌 Thu nhỏ xuống Tray khi đóng",
+      label: "📌 Minimize to tray on close",
       type: "checkbox",
       checked: settings.minimizeToTray,
       click: (item) => {
@@ -279,16 +314,16 @@ function updateTrayMenu() {
     },
     { type: "separator" },
     {
-      label: "🛡️ Bảo mật",
+      label: "🛡️ Security",
       submenu: [
         {
-          label: 'Chặn hiển thị "Đã xem"',
+          label: 'Block "Seen" receipts',
           type: "checkbox",
           checked: settings.blockSeen,
           click: (item) => toggleBlockSeen(item.checked),
         },
         {
-          label: 'Chặn hiển thị "Đang nhập"',
+          label: 'Block "Typing" indicator',
           type: "checkbox",
           checked: settings.blockTyping,
           click: (item) => toggleBlockTyping(item.checked),
@@ -296,10 +331,10 @@ function updateTrayMenu() {
       ],
     },
     { type: "separator" },
-    { label: "⬇️ Kiểm tra cập nhật", click: () => checkForUpdates(true) },
+    { label: "⬇️ Check for updates", click: () => checkForUpdates(true) },
     { type: "separator" },
     {
-      label: "❌ Thoát hoàn toàn",
+      label: "❌ Quit completely",
       click: () => {
         isQuitting = true;
         app.quit();
@@ -331,9 +366,9 @@ function setupAutoUpdater() {
     dialog
       .showMessageBox({
         type: "info",
-        title: "Có bản cập nhật mới",
-        message: `Đã có bản cập nhật mới v${info.version}. Bạn có muốn tải xuống và cài đặt không?`,
-        buttons: ["Tải xuống", "Bỏ qua"],
+        title: "Update available",
+        message: `A new update v${info.version} is available. Do you want to download and install it?`,
+        buttons: ["Download", "Skip"],
       })
       .then((result) => {
         if (result.response === 0) {
@@ -345,8 +380,8 @@ function setupAutoUpdater() {
   autoUpdater.on("update-not-available", (info) => {
     if (isManualUpdateCheck) {
       dialog.showMessageBox({
-        title: "Không có cập nhật",
-        message: "Bạn đang sử dụng phiên bản mới nhất.",
+        title: "No updates",
+        message: "You are using the latest version.",
       });
       isManualUpdateCheck = false;
     }
@@ -355,10 +390,10 @@ function setupAutoUpdater() {
   autoUpdater.on("update-downloaded", () => {
     dialog
       .showMessageBox({
-        title: "Đã tải xong cập nhật",
+        title: "Update downloaded",
         message:
-          "Bản cập nhật đã được tải xuống. Ứng dụng sẽ khởi động lại để cài đặt.",
-        buttons: ["Cài đặt và Khởi động lại"],
+          "The update has been downloaded. The app will restart to install it.",
+        buttons: ["Install and Restart"],
       })
       .then(() => {
         isQuitting = true;
@@ -369,25 +404,25 @@ function setupAutoUpdater() {
   autoUpdater.on("error", (err) => {
     if (isManualUpdateCheck) {
       let errorMessage =
-        err == null ? "Lỗi không xác định" : (err.stack || err).toString();
+        err == null ? "Unknown error" : (err.stack || err).toString();
       if (
         errorMessage.includes("No published versions on GitHub") ||
         errorMessage.includes("404 Not Found")
       ) {
         dialog.showMessageBox({
           type: "info",
-          title: "Thông tin cập nhật",
+          title: "Update info",
           message:
-            "Chưa có bản cập nhật nào được phát hành. Bạn đang sử dụng phiên bản mới nhất!",
+            "No updates have been released yet. You are using the latest version!",
         });
       } else {
-        dialog.showErrorBox("Lỗi cập nhật", errorMessage);
+        dialog.showErrorBox("Update error", errorMessage);
       }
       isManualUpdateCheck = false;
     }
   });
 
-  // Tự động kiểm tra cập nhật khi khởi động
+  // Automatically check for updates on startup
   setTimeout(() => {
     autoUpdater.checkForUpdates();
   }, 5000);
@@ -405,7 +440,7 @@ function toggleAutoLaunch(enable) {
 }
 
 // ============================================================
-//  QUẢN LÝ VIEW (WebContentsView)
+//  VIEW MANAGEMENT (WebContentsView)
 // ============================================================
 // The window shows at most one Messenger view at a time, layered over the
 // shell (index.html) which renders the sidebars. showView swaps the attached
@@ -571,23 +606,23 @@ function setupWebContents(contents, profileId) {
         menu.append(new MenuItem({ type: "separator" }));
     }
     if (params.selectionText)
-      menu.append(new MenuItem({ label: "📋 Sao chép", role: "copy" }));
+      menu.append(new MenuItem({ label: "📋 Copy", role: "copy" }));
     if (params.isEditable) {
-      menu.append(new MenuItem({ label: "📋 Dán", role: "paste" }));
-      menu.append(new MenuItem({ label: "✂️ Cắt", role: "cut" }));
-      menu.append(new MenuItem({ label: "📝 Chọn tất cả", role: "selectAll" }));
+      menu.append(new MenuItem({ label: "📋 Paste", role: "paste" }));
+      menu.append(new MenuItem({ label: "✂️ Cut", role: "cut" }));
+      menu.append(new MenuItem({ label: "📝 Select all", role: "selectAll" }));
     }
     if (params.linkURL) {
       menu.append(new MenuItem({ type: "separator" }));
       menu.append(
         new MenuItem({
-          label: "🔗 Mở liên kết",
+          label: "🔗 Open link",
           click: () => safeOpenExternal(params.linkURL),
         }),
       );
       menu.append(
         new MenuItem({
-          label: "📋 Sao chép liên kết",
+          label: "📋 Copy link",
           click: () => require("electron").clipboard.writeText(params.linkURL),
         }),
       );
@@ -596,7 +631,7 @@ function setupWebContents(contents, profileId) {
       menu.append(new MenuItem({ type: "separator" }));
       menu.append(
         new MenuItem({
-          label: "💾 Lưu ảnh",
+          label: "💾 Save image",
           click: () => contents.downloadURL(params.srcURL),
         }),
       );
@@ -604,13 +639,13 @@ function setupWebContents(contents, profileId) {
     menu.append(new MenuItem({ type: "separator" }));
     menu.append(
       new MenuItem({
-        label: "🔄 Tải lại trang",
+        label: "🔄 Reload page",
         click: () => contents.reload(),
       }),
     );
     menu.append(
       new MenuItem({
-        label: "◀️ Quay lại",
+        label: "◀️ Go back",
         enabled: contents.canGoBack(),
         click: () => contents.goBack(),
       }),
@@ -727,7 +762,7 @@ function setupWebContents(contents, profileId) {
 }
 
 // ============================================================
-//  TẠO CỬA SỔ CHÍNH
+//  CREATE MAIN WINDOW
 // ============================================================
 function createWindow() {
   const { windowBounds } = settings;
@@ -763,7 +798,7 @@ function createWindow() {
       (details, callback) => {
         let cancel = false;
 
-        // Chặn Đã xem (Block Seen)
+        // Block Seen
         if (settings.blockSeen) {
           if (
             details.url.includes("/change_read_status.php") ||
@@ -786,7 +821,7 @@ function createWindow() {
           }
         }
 
-        // Chặn Đang nhập (Block Typing)
+        // Block Typing
         if (settings.blockTyping) {
           if (
             details.url.includes("/typ.php") ||
@@ -921,18 +956,18 @@ function createWindow() {
     showView(browserViews[profile.id]);
   });
 
-  // ── Đăng xuất / Xóa session cho 1 profile ──
+  // ── Log out / clear the session for a single profile ──
   ipcMain.on("logout-profile", async (event, profileData) => {
     const { id, partition } = profileData;
     try {
-      // 1. Destroy view nếu đang tồn tại
+      // 1. Destroy the view if it exists
       if (browserViews[id]) {
         detachView(browserViews[id]);
         destroyViewContents(browserViews[id]);
         delete browserViews[id];
       }
 
-      // 2. Xóa sạch cookies + cache + storage của partition
+      // 2. Wipe cookies + cache + storage for the partition
       const sess = session.fromPartition(partition);
       await sess.clearStorageData({
         storages: [
@@ -949,7 +984,7 @@ function createWindow() {
       await sess.clearCache();
       await sess.clearAuthCache();
 
-      // 3. Tạo lại view mới với session sạch
+      // 3. Recreate the view with a clean session
       const view = new WebContentsView({
         webPreferences: {
           // Untrusted Messenger content: no preload, no Node, sandboxed.
@@ -963,7 +998,7 @@ function createWindow() {
       setupWebContents(view.webContents, id);
       view.webContents.loadURL(MESSENGER_URL, { userAgent: USER_AGENT });
 
-      // 4. Hiển thị lại
+      // 4. Show it again
       if (activeProfileId === id) {
         showView(view);
       }
@@ -978,7 +1013,7 @@ function createWindow() {
     }
   });
 
-  // ── Xóa session sạch khi tạo profile mới (đảm bảo không dùng lại cookie cũ) ──
+  // ── Wipe the session when creating a new profile (avoid reusing old cookies) ──
   ipcMain.on("clear-new-profile-session", async (event, partition) => {
     try {
       const sess = session.fromPartition(partition);
@@ -1175,7 +1210,7 @@ function createWindow() {
 }
 
 // ============================================================
-//  CẬP NHẬT BADGE TRÊN TASKBAR & TRAY
+//  UPDATE BADGE ON DOCK & TRAY
 // ============================================================
 function updateBadge(count) {
   if (!mainWindow) return;
@@ -1183,12 +1218,12 @@ function updateBadge(count) {
     app.dock.setBadge(count > 0 ? String(count) : "");
   }
   if (tray) {
-    tray.setToolTip(count > 0 ? `Mosx — ${count} tin nhắn chưa đọc` : "Mosx");
+    tray.setToolTip(count > 0 ? `Messy — ${count} unread` : "Messy");
   }
 }
 
 // ============================================================
-//  ĐĂNG KÝ PHÍM TẮT
+//  REGISTER GLOBAL SHORTCUTS
 // ============================================================
 function registerGlobalShortcuts() {
   const hotkey = settings.globalHotkey || "Ctrl+Shift+M";
@@ -1206,7 +1241,7 @@ function registerGlobalShortcuts() {
 }
 
 // ============================================================
-//  KHỞI ĐỘNG ỨNG DỤNG
+//  APP STARTUP
 // ============================================================
 function setupAppMenu() {
   // Minimal native macOS menu. Without an application menu the standard
@@ -1216,11 +1251,11 @@ function setupAppMenu() {
     { role: "appMenu" },
     { role: "editMenu" },
     {
-      label: "Cửa sổ",
+      label: "Window",
       submenu: [
         { role: "minimize" },
         // Cmd+W closes (hides) the window; the app keeps running in the dock.
-        { role: "close", label: "Đóng cửa sổ" },
+        { role: "close", label: "Close Window" },
         { role: "zoom" },
         { role: "front" },
       ],
@@ -1259,7 +1294,7 @@ app.whenReady().then(() => {
 });
 
 // ============================================================
-//  XỬ LÝ THOÁT
+//  QUIT HANDLING
 // ============================================================
 app.on("before-quit", () => {
   isQuitting = true;
