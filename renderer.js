@@ -1,7 +1,7 @@
-const { ipcRenderer } = require("electron");
-const path = require("path");
-const fs = require("fs");
-
+// All privileged capability comes through the vetted window.mosx bridge
+// (see preload.js). This renderer has no Node access: no require, no fs,
+// no ipcRenderer. `mosx` (window.mosx) is the only channel to the main
+// process; it is a global created by contextBridge, used directly below.
 const profilesList = document.getElementById("profiles-list");
 const scrollUpBtn = document.getElementById("scroll-up");
 const scrollDownBtn = document.getElementById("scroll-down");
@@ -173,7 +173,7 @@ function switchProfile(id) {
   renderSidebar();
   const p = profiles.find((x) => x.id === id);
   if (p) {
-    ipcRenderer.send("switch-profile", p);
+    mosx.switchProfile(p);
   }
 }
 
@@ -191,7 +191,7 @@ const avatarLetter = document.getElementById("avatar-letter");
 const avatarInput = document.getElementById("avatar-input");
 
 function openModal(profileToEdit = null) {
-  ipcRenderer.send("set-browserview-visibility", false);
+  mosx.setBrowserViewVisibility(false);
   editingProfile = profileToEdit;
   tempAvatarPath = profileToEdit ? profileToEdit.avatar : null;
 
@@ -230,6 +230,7 @@ function updateAvatarPreview() {
 nameInput.addEventListener("input", updateAvatarPreview);
 
 avatarPreview.onclick = () => avatarInput.click();
+document.getElementById("avatar-pick-label").onclick = () => avatarInput.click();
 avatarInput.onchange = (e) => {
   if (e.target.files && e.target.files[0]) {
     tempAvatarPath = e.target.files[0].path;
@@ -249,17 +250,17 @@ document.getElementById("modal-delete").onclick = () => {
     }
     profiles = profiles.filter((x) => x.id !== editingProfile.id);
     saveProfiles();
-    ipcRenderer.send("delete-profile", editingProfile.id);
+    mosx.deleteProfile(editingProfile.id);
     if (activeProfileId === editingProfile.id) switchProfile(profiles[0].id);
     modalOverlay.style.display = "none";
     renderSidebar();
-    ipcRenderer.send("set-browserview-visibility", true);
+    mosx.setBrowserViewVisibility(true);
   }
 };
 
 document.getElementById("modal-cancel").onclick = () => {
   modalOverlay.style.display = "none";
-  ipcRenderer.send("set-browserview-visibility", true);
+  mosx.setBrowserViewVisibility(true);
 };
 
 document.getElementById("modal-save").onclick = () => {
@@ -274,13 +275,14 @@ document.getElementById("modal-save").onclick = () => {
     editingProfile.avatar = tempAvatarPath;
   } else {
     // Sử dụng crypto UUID để tránh trùng ID
-    const id = crypto.randomUUID
-      ? crypto.randomUUID()
-      : Date.now().toString() + "_" + Math.random().toString(36).slice(2);
+    const id =
+      self.crypto && self.crypto.randomUUID
+        ? self.crypto.randomUUID()
+        : Date.now().toString() + "_" + Math.random().toString(36).slice(2);
     const partition = `persist:nick_${id}`;
     const p = { id, name, avatar: tempAvatarPath, partition };
     // Xóa sạch session cũ nếu tồn tại (đảm bảo không dùng cookie cũ)
-    ipcRenderer.send("clear-new-profile-session", partition);
+    mosx.clearNewProfileSession(partition);
     profiles.push(p);
     activeProfileId = id;
   }
@@ -288,7 +290,7 @@ document.getElementById("modal-save").onclick = () => {
   saveProfiles();
   modalOverlay.style.display = "none";
   renderSidebar();
-  ipcRenderer.send("set-browserview-visibility", true);
+  mosx.setBrowserViewVisibility(true);
   if (!editingProfile) switchProfile(activeProfileId);
 };
 
@@ -310,14 +312,14 @@ document.getElementById("modal-logout").onclick = () => {
   editingProfile.avatar = null;
   saveProfiles();
 
-  ipcRenderer.send("logout-profile", {
+  mosx.logoutProfile({
     id: editingProfile.id,
     partition: editingProfile.partition,
   });
 };
 
 // Nhận kết quả logout
-ipcRenderer.on("logout-profile-done", (event, { id, success }) => {
+mosx.onLogoutDone(({ id, success }) => {
   const logoutBtn = document.getElementById("modal-logout");
   if (success) {
     logoutBtn.innerHTML =
@@ -330,7 +332,7 @@ ipcRenderer.on("logout-profile-done", (event, { id, success }) => {
       logoutBtn.style.color = "";
       logoutBtn.style.borderColor = "";
       renderSidebar();
-      ipcRenderer.send("set-browserview-visibility", true);
+      mosx.setBrowserViewVisibility(true);
     }, 800);
   } else {
     logoutBtn.innerHTML =
@@ -354,35 +356,31 @@ const toggleDarkMode = () => {
   document.getElementById("icon-moon").style.display = isDarkMode
     ? "block"
     : "none";
-  ipcRenderer.send("set-theme", isDarkMode);
+  mosx.setTheme(isDarkMode);
 };
 document.getElementById("btn-dark-mode").onclick = toggleDarkMode;
-document.getElementById("btn-zoom-in").onclick = () =>
-  ipcRenderer.send("zoom-in");
-document.getElementById("btn-zoom-out").onclick = () =>
-  ipcRenderer.send("zoom-out");
-document.getElementById("btn-fs").onclick = () =>
-  ipcRenderer.send("toggle-fullscreen");
+document.getElementById("btn-zoom-in").onclick = () => mosx.zoomIn();
+document.getElementById("btn-zoom-out").onclick = () => mosx.zoomOut();
+document.getElementById("btn-fs").onclick = () => mosx.toggleFullscreen();
 document.getElementById("btn-pin").onclick = () => {
   const btn = document.getElementById("btn-pin");
   const isPinned = btn.style.opacity === "1";
   btn.style.opacity = isPinned ? "0.4" : "1";
-  ipcRenderer.send("toggle-always-on-top");
+  mosx.toggleAlwaysOnTop();
 };
-document.getElementById("btn-reload").onclick = () =>
-  ipcRenderer.send("reload-page");
-document.getElementById("btn-home").onclick = () => ipcRenderer.send("go-home");
-document.getElementById("btn-back").onclick = () => ipcRenderer.send("go-back");
+document.getElementById("btn-reload").onclick = () => mosx.reloadPage();
+document.getElementById("btn-home").onclick = () => mosx.goHome();
+document.getElementById("btn-back").onclick = () => mosx.goBack();
 document.getElementById("btn-j2team").onclick = () => {
-  require("electron").shell.openExternal(
+  mosx.openExternal(
     "https://chromewebstore.google.com/detail/j2team-security/hmlcjjclebjnfohgmgikjfnbmfkigocc",
   );
 };
 
 // Lock button — click: lock, right-click: settings
 document.getElementById("btn-lock").onclick = () => {
-  const ls = ipcRenderer.sendSync("get-lock-settings");
-  if (ls.enabled && ls.hash) {
+  const ls = mosx.getLockSettings();
+  if (ls.enabled) {
     lockApp("verify");
   } else {
     lockApp("setup");
@@ -398,7 +396,7 @@ document.getElementById("btn-lock").oncontextmenu = (e) => {
 // ============================================================
 let profileBadgeCounts = {};
 
-ipcRenderer.on("update-profile-badge", (event, { id, count }) => {
+mosx.onProfileBadge(({ id, count }) => {
   const badge = document.getElementById(`badge-${id}`);
   if (badge) {
     badge.innerText = count > 9 ? "9+" : count;
@@ -409,10 +407,10 @@ ipcRenderer.on("update-profile-badge", (event, { id, count }) => {
     (a, b) => a + b,
     0,
   );
-  ipcRenderer.send("update-badge", totalCount);
+  mosx.updateBadge(totalCount);
 });
 
-ipcRenderer.on("update-profile-avatar", (event, { id, avatarUrl }) => {
+mosx.onProfileAvatar(({ id, avatarUrl }) => {
   const p = profiles.find((x) => x.id === id);
   if (p) {
     const isAutoAvatar =
@@ -431,7 +429,7 @@ ipcRenderer.on("update-profile-avatar", (event, { id, avatarUrl }) => {
 // ============================================================
 //  INIT
 // ============================================================
-const settings = ipcRenderer.sendSync("get-settings");
+const settings = mosx.getSettings();
 isDarkMode = settings.isDarkMode;
 document.body.className = isDarkMode ? "dark-mode" : "light-mode";
 document.getElementById("icon-sun").style.display = isDarkMode
@@ -450,8 +448,6 @@ switchProfile(activeProfileId);
 // ============================================================
 //  APP LOCK MODULE
 // ============================================================
-const crypto = require("crypto");
-
 const lockScreen = document.getElementById("lock-screen");
 const pinDotsContainer = document.getElementById("pin-dots");
 const lockMessage = document.getElementById("lock-message");
@@ -467,20 +463,13 @@ const lock = {
   isLocked: false,
 };
 
-function hashPin(pin) {
-  return crypto
-    .createHash("sha256")
-    .update(pin + "_mosx_salt_2026")
-    .digest("hex");
-}
-
 function lockApp(mode) {
   lock.mode = mode || "verify";
   lock.enteredPin = "";
   lock.setupPin = "";
   lock.isLocked = true;
   lockScreen.classList.add("active");
-  ipcRenderer.send("set-browserview-visibility", false);
+  mosx.setBrowserViewVisibility(false);
   updatePinDots();
 
   if (mode === "setup") {
@@ -499,7 +488,7 @@ function unlockApp() {
   lock.enteredPin = "";
   lock.wrongAttempts = 0;
   lockScreen.classList.remove("active");
-  ipcRenderer.send("set-browserview-visibility", true);
+  mosx.setBrowserViewVisibility(true);
   resetIdleTimer();
 }
 
@@ -524,9 +513,7 @@ function handlePinKey(key) {
   }
 }
 
-function handlePinComplete() {
-  const ls = ipcRenderer.sendSync("get-lock-settings");
-
+async function handlePinComplete() {
   if (lock.mode === "setup") {
     // Step 1: Save first entry
     lock.setupPin = lock.enteredPin;
@@ -538,8 +525,8 @@ function handlePinComplete() {
   } else if (lock.mode === "confirm") {
     // Step 2: Confirm PIN match
     if (lock.enteredPin === lock.setupPin) {
-      const hash = hashPin(lock.enteredPin);
-      ipcRenderer.send("save-lock-settings", { enabled: true, hash });
+      // Hashing happens in the main process; the hash never reaches here.
+      await mosx.setupPin(lock.enteredPin);
       lockMessage.textContent = "✅ Đã thiết lập mã PIN!";
       lockMessage.className = "lock-subtitle success";
       setTimeout(unlockApp, 700);
@@ -558,9 +545,9 @@ function handlePinComplete() {
       }, 600);
     }
   } else if (lock.mode === "verify") {
-    // Verify PIN
-    const hash = hashPin(lock.enteredPin);
-    if (hash === ls.hash) {
+    // Verify PIN — comparison happens in the main process.
+    const ok = await mosx.verifyPin(lock.enteredPin);
+    if (ok) {
       lockMessage.textContent = "✅ Đã mở khoá!";
       lockMessage.className = "lock-subtitle success";
       setTimeout(unlockApp, 300);
@@ -607,7 +594,7 @@ document.addEventListener("keydown", (e) => {
 // Lock disable button (shown in footer)
 lockDisableBtn.onclick = () => {
   if (confirm("Bạn có chắc muốn tắt khoá ứng dụng?")) {
-    ipcRenderer.send("save-lock-settings", { enabled: false, hash: "" });
+    mosx.disableLock();
     unlockApp();
   }
 };
@@ -622,24 +609,24 @@ const lsChangePin = document.getElementById("ls-change-pin");
 const lsRemovePin = document.getElementById("ls-remove-pin");
 
 function openLockSettings() {
-  const ls = ipcRenderer.sendSync("get-lock-settings");
+  const ls = mosx.getLockSettings();
   lsToggle.classList.toggle("on", ls.enabled);
   lsTimeout.value = String(ls.timeout || 5);
   lsChangePin.style.display = ls.enabled ? "block" : "none";
   lsRemovePin.style.display = ls.enabled ? "block" : "none";
   lockSettingsOverlay.style.display = "flex";
-  ipcRenderer.send("set-browserview-visibility", false);
+  mosx.setBrowserViewVisibility(false);
 }
 
 lsToggle.onclick = () => {
-  const ls = ipcRenderer.sendSync("get-lock-settings");
+  const ls = mosx.getLockSettings();
   if (!ls.enabled) {
     // Enable: show setup PIN
     lockSettingsOverlay.style.display = "none";
     lockApp("setup");
   } else {
     // Disable
-    ipcRenderer.send("save-lock-settings", { enabled: false, hash: "" });
+    mosx.disableLock();
     lsToggle.classList.remove("on");
     lsChangePin.style.display = "none";
     lsRemovePin.style.display = "none";
@@ -647,9 +634,7 @@ lsToggle.onclick = () => {
 };
 
 lsTimeout.onchange = () => {
-  ipcRenderer.send("save-lock-settings", {
-    timeout: parseInt(lsTimeout.value),
-  });
+  mosx.setLockTimeout(parseInt(lsTimeout.value));
   resetIdleTimer();
 };
 
@@ -660,16 +645,16 @@ lsChangePin.onclick = () => {
 
 lsRemovePin.onclick = () => {
   if (confirm("Xoá mã PIN? Khoá ứng dụng sẽ bị tắt.")) {
-    ipcRenderer.send("save-lock-settings", { enabled: false, hash: "" });
+    mosx.disableLock();
     lockSettingsOverlay.style.display = "none";
-    ipcRenderer.send("set-browserview-visibility", true);
+    mosx.setBrowserViewVisibility(true);
     lsToggle.classList.remove("on");
   }
 };
 
 document.getElementById("ls-close").onclick = () => {
   lockSettingsOverlay.style.display = "none";
-  ipcRenderer.send("set-browserview-visibility", true);
+  mosx.setBrowserViewVisibility(true);
 };
 
 // ============================================================
@@ -677,7 +662,7 @@ document.getElementById("ls-close").onclick = () => {
 // ============================================================
 function resetIdleTimer() {
   if (lock.idleTimer) clearTimeout(lock.idleTimer);
-  const ls = ipcRenderer.sendSync("get-lock-settings");
+  const ls = mosx.getLockSettings();
   if (ls.enabled && ls.timeout > 0) {
     lock.idleTimer = setTimeout(
       () => {
@@ -701,7 +686,7 @@ function resetIdleTimer() {
 // ============================================================
 //  INIT LOCK — Lock on startup if enabled
 // ============================================================
-if (settings.appLockEnabled && settings.appLockHash) {
+if (settings.appLockEnabled) {
   lockApp("verify");
 }
 resetIdleTimer();
@@ -792,8 +777,14 @@ function getFileIcon(filename) {
   return icons[ext] || "📎";
 }
 
-function showDlToast(msg) {
-  dlToast.innerHTML = msg;
+function showDlToast(prefix, filename) {
+  // Build with DOM nodes so an attacker-controlled filename is inert text,
+  // never parsed as HTML.
+  dlToast.replaceChildren();
+  dlToast.append(prefix + " ");
+  const b = document.createElement("b");
+  b.textContent = filename || "";
+  dlToast.append(b);
   dlToast.classList.add("show");
   setTimeout(() => dlToast.classList.remove("show"), 3000);
 }
@@ -841,37 +832,85 @@ function renderDownloads() {
           ? formatBytes(dl.received)
           : "Đang tải...";
 
-    let actionsHtml = "";
-    if (dl.done && dl.state === "completed") {
-      actionsHtml = `
-        <button class="dl-action-btn" onclick="ipcRenderer.send('open-download-file','${dl.savePath.replace(/\\/g, "\\\\")}')" title="Mở file">
-          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        </button>
-        <button class="dl-action-btn" onclick="ipcRenderer.send('open-download-folder','${dl.savePath.replace(/\\/g, "\\\\")}')" title="Mở thư mục">
-          <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-        </button>`;
-    } else if (!dl.done) {
-      actionsHtml = `
-        <button class="dl-action-btn" onclick="ipcRenderer.send('cancel-download',${dl.id})" title="Huỷ">
-          <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>`;
+    // ── Build the row with DOM nodes (no innerHTML for data) ──
+    const iconEl = document.createElement("div");
+    iconEl.className = `dl-icon ${iconClass}`.trim();
+    iconEl.textContent = statusIcon;
+
+    const info = document.createElement("div");
+    info.className = "dl-info";
+
+    const fnEl = document.createElement("div");
+    fnEl.className = "dl-filename";
+    // Attacker-controlled filename → attribute + text only, never markup.
+    fnEl.setAttribute("title", dl.filename);
+    fnEl.textContent = dl.filename;
+
+    const meta = document.createElement("div");
+    meta.className = "dl-meta";
+    const s1 = document.createElement("span");
+    s1.textContent = statusText;
+    const s2 = document.createElement("span");
+    s2.textContent = "·";
+    const s3 = document.createElement("span");
+    s3.textContent = sizeText;
+    meta.append(s1, s2, s3);
+
+    info.append(fnEl, meta);
+
+    if (!dl.done) {
+      const bar = document.createElement("div");
+      bar.className = "dl-progress-bar";
+      const fill = document.createElement("div");
+      fill.className = "dl-progress-fill";
+      fill.style.width = pct + "%";
+      bar.append(fill);
+      info.append(bar);
     }
 
-    item.innerHTML = `
-      <div class="dl-icon ${iconClass}">${statusIcon}</div>
-      <div class="dl-info">
-        <div class="dl-filename" title="${dl.filename}">${dl.filename}</div>
-        <div class="dl-meta"><span>${statusText}</span><span>·</span><span>${sizeText}</span></div>
-        ${!dl.done ? `<div class="dl-progress-bar"><div class="dl-progress-fill" style="width:${pct}%"></div></div>` : ""}
-      </div>
-      <div class="dl-actions">${actionsHtml}</div>`;
+    const actions = document.createElement("div");
+    actions.className = "dl-actions";
 
+    // SVG markup below is a constant string (no user data, no script).
+    const makeBtn = (svg, title, handler) => {
+      const btn = document.createElement("button");
+      btn.className = "dl-action-btn";
+      btn.title = title;
+      btn.innerHTML = svg;
+      btn.addEventListener("click", handler);
+      return btn;
+    };
+
+    if (dl.done && dl.state === "completed") {
+      actions.append(
+        makeBtn(
+          '<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+          "Mở file",
+          () => mosx.openDownloadFile(dl.id),
+        ),
+        makeBtn(
+          '<svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+          "Mở thư mục",
+          () => mosx.openDownloadFolder(dl.id),
+        ),
+      );
+    } else if (!dl.done) {
+      actions.append(
+        makeBtn(
+          '<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+          "Huỷ",
+          () => mosx.cancelDownload(dl.id),
+        ),
+      );
+    }
+
+    item.append(iconEl, info, actions);
     dlList.insertBefore(item, dlEmpty);
   });
 }
 
 // IPC: Download events from main process
-ipcRenderer.on("download-started", (event, data) => {
+mosx.onDownloadStarted((data) => {
   downloads.push({
     id: data.id,
     filename: data.filename,
@@ -887,10 +926,10 @@ ipcRenderer.on("download-started", (event, data) => {
     dlPanelOpen = true;
     dlPanel.style.display = "flex";
   }
-  showDlToast(`⬇️ Bắt đầu tải: <b>${data.filename}</b>`);
+  showDlToast("⬇️ Bắt đầu tải:", data.filename);
 });
 
-ipcRenderer.on("download-progress", (event, data) => {
+mosx.onDownloadProgress((data) => {
   const dl = downloads.find((d) => d.id === data.id);
   if (dl) {
     dl.received = data.received;
@@ -911,7 +950,7 @@ ipcRenderer.on("download-progress", (event, data) => {
   }
 });
 
-ipcRenderer.on("download-done", (event, data) => {
+mosx.onDownloadDone((data) => {
   const dl = downloads.find((d) => d.id === data.id);
   if (dl) {
     dl.done = true;
@@ -919,9 +958,9 @@ ipcRenderer.on("download-done", (event, data) => {
     dl.savePath = data.savePath || dl.savePath;
     renderDownloads();
     if (data.state === "completed") {
-      showDlToast(`✅ Đã tải xong: <b>${data.filename}</b>`);
+      showDlToast("✅ Đã tải xong:", data.filename);
     } else {
-      showDlToast(`❌ Tải thất bại: <b>${data.filename}</b>`);
+      showDlToast("❌ Tải thất bại:", data.filename);
     }
   }
 });

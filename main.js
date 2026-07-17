@@ -21,11 +21,13 @@ const {
 const { autoUpdater } = require("electron-updater");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 
 // ============================================================
 //  HỆ THỐNG DOWNLOAD
 // ============================================================
 let activeDownloads = new Map(); // id -> { item, filename, savePath, received, total }
+let completedDownloads = new Map(); // id -> sanitized absolute savePath (open-by-id)
 let downloadCounter = 0;
 
 // ============================================================
@@ -84,6 +86,116 @@ function saveSettings(data) {
   try {
     fs.writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), "utf8");
   } catch (err) {}
+}
+
+// ============================================================
+//  APP-LOCK PIN HASHING (main-process only)
+//  The PIN hash never crosses to any renderer. New PINs use scrypt
+//  with a per-install random salt; legacy sha256 hashes are still
+//  accepted and transparently upgraded on the next successful unlock.
+// ============================================================
+function legacyPinHash(pin) {
+  return crypto
+    .createHash("sha256")
+    .update(pin + "_mosx_salt_2026")
+    .digest("hex");
+}
+
+function makePinHash(pin) {
+  const salt = crypto.randomBytes(16);
+  const dk = crypto.scryptSync(String(pin), salt, 32);
+  return `scrypt$${salt.toString("hex")}$${dk.toString("hex")}`;
+}
+
+function verifyPinHash(pin, stored) {
+  if (!stored) return false;
+  try {
+    if (stored.startsWith("scrypt$")) {
+      const [, saltHex, hashHex] = stored.split("$");
+      const dk = crypto.scryptSync(String(pin), Buffer.from(saltHex, "hex"), 32);
+      const expected = Buffer.from(hashHex, "hex");
+      return dk.length === expected.length && crypto.timingSafeEqual(dk, expected);
+    }
+    // Legacy sha256 hex
+    const cand = Buffer.from(legacyPinHash(pin), "hex");
+    const expected = Buffer.from(stored, "hex");
+    return (
+      cand.length === expected.length && crypto.timingSafeEqual(cand, expected)
+    );
+  } catch {
+    return false;
+  }
+}
+
+// ============================================================
+//  SAFE EXTERNAL NAVIGATION
+//  Only ever open http/https/mailto in the OS handler. Rejects
+//  file:, data:, javascript:, custom-scheme, and UNC targets.
+// ============================================================
+function safeOpenExternal(url) {
+  try {
+    const u = new URL(String(url));
+    if (
+      u.protocol === "https:" ||
+      u.protocol === "http:" ||
+      u.protocol === "mailto:"
+    ) {
+      shell.openExternal(url);
+    }
+  } catch {}
+}
+
+// ============================================================
+//  ORIGIN TRUST BOUNDARY
+//  Parse the URL and match the *parsed* hostname against an allowlist.
+//  Substring checks (url.includes("facebook.com")) are bypassable
+//  (evil.com/facebook.com, facebook.com.evil.com) and must not be used.
+// ============================================================
+const ALLOWED_HOSTS = new Set([
+  "facebook.com",
+  "www.facebook.com",
+  "m.facebook.com",
+  "messenger.com",
+  "www.messenger.com",
+]);
+
+function isTrusted(url) {
+  let u;
+  try {
+    u = new URL(String(url));
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:") return false;
+  return (
+    ALLOWED_HOSTS.has(u.hostname) ||
+    u.hostname.endsWith(".facebook.com") ||
+    u.hostname.endsWith(".messenger.com") ||
+    u.hostname.endsWith(".fbcdn.net")
+  );
+}
+
+// IPC sender guard: sensitive channels are honored only from the trusted
+// local shell window. (The Messenger views have no preload/Node and cannot
+// reach ipcRenderer at all — this is defense-in-depth.)
+function isShellSender(event) {
+  return !!mainWindow && event.sender === mainWindow.webContents;
+}
+
+// ============================================================
+//  DOWNLOAD PATH SAFETY
+//  A Content-Disposition filename is attacker-controlled. Reduce to a
+//  bare basename and confirm the resolved path stays inside Downloads.
+// ============================================================
+function sanitizeDownloadName(raw) {
+  const base = path.basename(String(raw || "")).replace(/[/\\]/g, "");
+  return base || "download";
+}
+
+function containedInDownloads(p) {
+  const dir = path.resolve(app.getPath("downloads"));
+  const resolved = path.resolve(String(p || ""));
+  return resolved === dir || resolved.startsWith(dir + path.sep);
 }
 
 // ============================================================
@@ -341,9 +453,14 @@ function setupDownloadHandler(sess) {
 
   sess.on("will-download", (event, item, webContents) => {
     const id = ++downloadCounter;
-    const filename = item.getFilename() || "download";
-    const downloadsPath = app.getPath("downloads");
-    const savePath = path.join(downloadsPath, filename);
+    // Content-Disposition filename is attacker-controlled → strip to a bare
+    // basename and confirm the resolved path stays inside Downloads.
+    const filename = sanitizeDownloadName(item.getFilename());
+    const downloadsPath = path.resolve(app.getPath("downloads"));
+    let savePath = path.resolve(path.join(downloadsPath, filename));
+    if (!containedInDownloads(savePath)) {
+      savePath = path.join(downloadsPath, "download");
+    }
     item.setSavePath(savePath);
 
     const total = item.getTotalBytes();
@@ -375,6 +492,7 @@ function setupDownloadHandler(sess) {
     });
 
     item.once("done", (event, state) => {
+      if (state === "completed") completedDownloads.set(id, savePath);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send("download-done", {
           id,
@@ -393,16 +511,21 @@ function setupWebContents(contents, profileId) {
   setupDownloadHandler(contents.session);
 
   contents.setWindowOpenHandler(({ url }) => {
-    if (
-      url.includes("facebook.com") ||
-      url.includes("messenger.com") ||
-      url.includes("fbcdn.net")
-    ) {
+    if (isTrusted(url)) {
       return { action: "allow" };
     }
-    shell.openExternal(url);
+    safeOpenExternal(url);
     return { action: "deny" };
   });
+
+  // Block navigation/redirect of the Messenger view to any non-allowlisted
+  // origin. (Top-level will-navigate does not fire for child-frame navs;
+  // combined with the deny-by-default window-open handler above.)
+  const blockUntrustedNav = (event, url) => {
+    if (!isTrusted(url)) event.preventDefault();
+  };
+  contents.on("will-navigate", blockUntrustedNav);
+  contents.on("will-redirect", blockUntrustedNav);
 
   contents.on("context-menu", (event, params) => {
     const menu = new Menu();
@@ -430,7 +553,7 @@ function setupWebContents(contents, profileId) {
       menu.append(
         new MenuItem({
           label: "🔗 Mở liên kết",
-          click: () => shell.openExternal(params.linkURL),
+          click: () => safeOpenExternal(params.linkURL),
         }),
       );
       menu.append(
@@ -594,8 +717,10 @@ function createWindow() {
     autoHideMenuBar: true,
     titleBarOverlay: false,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      preload: path.join(__dirname, "preload.js"),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
       spellcheck: false,
     },
   });
@@ -660,11 +785,7 @@ function createWindow() {
 
     sess.setPermissionRequestHandler((webContents, permission, callback) => {
       const url = webContents.getURL();
-      const isFacebook =
-        url.includes("facebook.com") ||
-        url.includes("messenger.com") ||
-        url.includes("fbcdn.net");
-      if (isFacebook) {
+      if (isTrusted(url)) {
         const allowedPermissions = [
           "notifications",
           "media",
@@ -684,10 +805,32 @@ function createWindow() {
 
     sess.setPermissionCheckHandler((webContents, permission) => {
       const url = webContents?.getURL() || "";
-      if (url.includes("facebook.com") || url.includes("messenger.com")) {
-        return true;
-      }
-      return false;
+      return isTrusted(url);
+    });
+  });
+
+  // Strict Content-Security-Policy for the local shell content.
+  // Applied to the default session only — the Messenger views run on their
+  // own partition sessions and are intentionally unaffected. The absence of
+  // 'unsafe-inline' in script-src is what stops injected inline handlers or
+  // <script> from ever executing (defense-in-depth behind not rendering
+  // untrusted data as HTML).
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        "Content-Security-Policy": [
+          "default-src 'self' file:; " +
+            "script-src 'self' file:; " +
+            "style-src 'self' 'unsafe-inline'; " +
+            "img-src 'self' file: data: https:; " +
+            "font-src 'self' data:; " +
+            "connect-src 'self'; " +
+            "object-src 'none'; " +
+            "base-uri 'none'; " +
+            "frame-ancestors 'none';",
+        ],
+      },
     });
   });
 
@@ -738,10 +881,12 @@ function createWindow() {
     if (!browserViews[profile.id]) {
       const view = new BrowserView({
         webPreferences: {
+          // Untrusted Messenger content: no preload, no Node, sandboxed,
+          // isolated per-profile partition.
           partition: profile.partition,
-          preload: path.join(__dirname, "preload.js"),
           contextIsolation: true,
           nodeIntegration: false,
+          sandbox: true,
         },
       });
       browserViews[profile.id] = view;
@@ -785,10 +930,11 @@ function createWindow() {
       // 3. Tạo lại BrowserView mới với session sạch
       const view = new BrowserView({
         webPreferences: {
+          // Untrusted Messenger content: no preload, no Node, sandboxed.
           partition: partition,
-          preload: path.join(__dirname, "preload.js"),
           contextIsolation: true,
           nodeIntegration: false,
+          sandbox: true,
         },
       });
       browserViews[id] = view;
@@ -916,39 +1062,78 @@ function createWindow() {
       isDarkMode: settings.isDarkMode,
       alwaysOnTop: settings.alwaysOnTop,
       appLockEnabled: settings.appLockEnabled,
-      appLockHash: settings.appLockHash,
       appLockTimeout: settings.appLockTimeout,
     };
   });
 
-  ipcMain.on("save-lock-settings", (event, data) => {
-    if (data.enabled !== undefined) settings.appLockEnabled = data.enabled;
-    if (data.hash !== undefined) settings.appLockHash = data.hash;
-    if (data.timeout !== undefined) settings.appLockTimeout = data.timeout;
+  // App-lock: hashing/verification happen here; the hash never leaves main.
+  ipcMain.handle("applock:setup", (event, pin) => {
+    if (!isShellSender(event)) return false;
+    if (!/^\d{4}$/.test(String(pin ?? ""))) return false;
+    settings.appLockHash = makePinHash(String(pin));
+    settings.appLockEnabled = true;
     saveSettings(settings);
+    return true;
+  });
+
+  ipcMain.handle("applock:verify", (event, pin) => {
+    if (!isShellSender(event)) return false;
+    const ok = verifyPinHash(String(pin ?? ""), settings.appLockHash);
+    // Transparently upgrade a legacy sha256 hash to scrypt on success.
+    if (ok && settings.appLockHash && !settings.appLockHash.startsWith("scrypt$")) {
+      settings.appLockHash = makePinHash(String(pin));
+      saveSettings(settings);
+    }
+    return ok;
+  });
+
+  ipcMain.on("applock:disable", () => {
+    settings.appLockEnabled = false;
+    settings.appLockHash = "";
+    saveSettings(settings);
+  });
+
+  ipcMain.on("applock:set-timeout", (event, minutes) => {
+    const m = parseInt(minutes, 10);
+    if (Number.isFinite(m) && m >= 0) {
+      settings.appLockTimeout = m;
+      saveSettings(settings);
+    }
+  });
+
+  // External links, validated (http/https/mailto only).
+  ipcMain.on("open-external", (event, url) => {
+    if (isShellSender(event)) safeOpenExternal(url);
   });
 
   ipcMain.on("get-lock-settings", (event) => {
     event.returnValue = {
       enabled: settings.appLockEnabled,
-      hash: settings.appLockHash,
       timeout: settings.appLockTimeout,
     };
   });
 
   // ── Download IPC handlers ──
-  ipcMain.on("open-download-file", (event, filePath) => {
-    if (filePath && fs.existsSync(filePath)) {
-      shell.openPath(filePath);
-    }
+  // Resolve a download id to the sanitized path the app actually wrote,
+  // re-validating containment. Never accept a renderer-supplied path.
+  function resolveDownloadPath(id) {
+    const active = activeDownloads.get(id);
+    const p = completedDownloads.get(id) || (active && active.savePath);
+    if (p && containedInDownloads(p) && fs.existsSync(p)) return p;
+    return null;
+  }
+
+  ipcMain.on("open-download-file", (event, id) => {
+    if (!isShellSender(event)) return;
+    const p = resolveDownloadPath(id);
+    if (p) shell.openPath(p);
   });
 
-  ipcMain.on("open-download-folder", (event, filePath) => {
-    if (filePath && fs.existsSync(filePath)) {
-      shell.showItemInFolder(filePath);
-    } else {
-      shell.openPath(app.getPath("downloads"));
-    }
+  ipcMain.on("open-download-folder", (event, id) => {
+    if (!isShellSender(event)) return;
+    const p = resolveDownloadPath(id);
+    if (p) shell.showItemInFolder(p);
+    else shell.openPath(app.getPath("downloads"));
   });
 
   ipcMain.on("cancel-download", (event, id) => {
