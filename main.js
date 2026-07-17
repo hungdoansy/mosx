@@ -36,9 +36,7 @@ let downloadCounter = 0;
 const MESSENGER_URL = "https://www.facebook.com/messages";
 const APP_ID = "com.mosx.app";
 const USER_AGENT =
-  process.platform === "darwin"
-    ? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-    : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 
 // ============================================================
 //  CHỐNG CHẠY TRÙNG LẶP (Single Instance Lock)
@@ -46,10 +44,6 @@ const USER_AGENT =
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
-}
-
-if (process.platform === "win32") {
-  app.setAppUserModelId(APP_ID);
 }
 
 // ============================================================
@@ -211,28 +205,6 @@ let browserViews = {}; // { profileId: BrowserView }
 let activeProfileId = null;
 
 // ============================================================
-//  TẠO ICON BADGE
-// ============================================================
-function createBadgeIcon(count) {
-  const size = 18;
-  const text = count > 9 ? "9+" : String(count);
-  const fontSize = count > 9 ? 9 : 11;
-
-  const svg = `
-    <svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="#e74c3c"/>
-      <text x="${size / 2}" y="${size / 2 + fontSize / 3}"
-            text-anchor="middle" fill="white"
-            font-size="${fontSize}" font-weight="bold"
-            font-family="Arial, sans-serif">${text}</text>
-    </svg>`;
-
-  return nativeImage.createFromDataURL(
-    `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`,
-  );
-}
-
-// ============================================================
 //  TẠO SYSTEM TRAY
 // ============================================================
 function createTray() {
@@ -286,10 +258,7 @@ function updateTrayMenu() {
       },
     },
     {
-      label:
-        process.platform === "darwin"
-          ? "🚀 Khởi động cùng macOS"
-          : "🚀 Khởi động cùng Windows",
+      label: "🚀 Khởi động cùng macOS",
       type: "checkbox",
       checked: settings.autoLaunch,
       click: (item) => toggleAutoLaunch(item.checked),
@@ -1150,20 +1119,7 @@ function createWindow() {
 // ============================================================
 function updateBadge(count) {
   if (!mainWindow) return;
-  if (process.platform === "win32") {
-    if (count > 0) {
-      try {
-        mainWindow.setOverlayIcon(
-          createBadgeIcon(count),
-          `${count} tin nhắn chưa đọc`,
-        );
-      } catch {
-        mainWindow.setOverlayIcon(null, "");
-      }
-    } else {
-      mainWindow.setOverlayIcon(null, "");
-    }
-  } else if (process.platform === "darwin") {
+  if (app.dock) {
     app.dock.setBadge(count > 0 ? String(count) : "");
   }
   if (tray) {
@@ -1192,8 +1148,23 @@ function registerGlobalShortcuts() {
 // ============================================================
 //  KHỞI ĐỘNG ỨNG DỤNG
 // ============================================================
+function setupAppMenu() {
+  // Minimal native macOS menu. Without an application menu the standard
+  // Cmd+C / Cmd+V / Cmd+A / Cmd+Q shortcuts do not work inside the
+  // Messenger view.
+  const template = [
+    { role: "appMenu" },
+    { role: "editMenu" },
+    {
+      label: "Cửa sổ",
+      submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "front" }],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 app.whenReady().then(() => {
-  Menu.setApplicationMenu(null);
+  setupAppMenu();
   nativeTheme.themeSource = settings.isDarkMode ? "dark" : "light";
   createWindow();
   createTray();
