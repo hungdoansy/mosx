@@ -204,6 +204,29 @@ function isTrusted(url) {
   );
 }
 
+// ============================================================
+//  OAUTH LOGIN-POPUP TRUST (popup-scoped, NOT navigation-scoped)
+//  "Continue with Google/Apple" opens a login popup on a third-party
+//  origin. Those origins are trusted ONLY for opening/navigating that
+//  popup — never for top-level navigation of the Messenger view, which
+//  stays gated by isTrusted() above. Keep these two allowlists separate.
+// ============================================================
+function isAllowedPopupHost(url) {
+  let u;
+  try {
+    u = new URL(String(url));
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:") return false;
+  return (
+    u.hostname === "google.com" ||
+    u.hostname.endsWith(".google.com") ||
+    u.hostname === "apple.com" ||
+    u.hostname.endsWith(".apple.com")
+  );
+}
+
 // IPC sender guard: sensitive channels are honored only from the trusted
 // local shell window. (The Messenger views have no preload/Node and cannot
 // reach ipcRenderer at all — this is defense-in-depth.)
@@ -564,6 +587,24 @@ function setupWebContents(contents, profileId) {
     if (isTrusted(url)) {
       return { action: "allow" };
     }
+    // "Continue with Google/Apple" opens a login popup on a third-party
+    // OAuth origin. Allow it as a popup window that shares this view's
+    // session (so the login completes in the right account), but keep it
+    // out of the top-level navigation trust below.
+    if (isAllowedPopupHost(url)) {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          width: 600,
+          height: 720,
+          webPreferences: {
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+          },
+        },
+      };
+    }
     safeOpenExternal(url);
     return { action: "deny" };
   });
@@ -571,6 +612,8 @@ function setupWebContents(contents, profileId) {
   // Block navigation/redirect of the Messenger view to any non-allowlisted
   // origin. (Top-level will-navigate does not fire for child-frame navs;
   // combined with the deny-by-default window-open handler above.)
+  // NOTE: the main view uses isTrusted only — the OAuth popup allowlist must
+  // never widen top-level navigation trust.
   const blockUntrustedNav = (event, url) => {
     if (!isTrusted(url)) event.preventDefault();
   };
@@ -579,16 +622,35 @@ function setupWebContents(contents, profileId) {
 
   // A popup opened via the allowed window-open path gets a fresh webContents
   // that would otherwise bypass the navigation allowlist. Apply the same
-  // guards (recursively, since the popup can spawn its own popups).
+  // guards (recursively, since the popup can spawn its own popups). The popup
+  // may legitimately move between the OAuth provider and Facebook/Messenger,
+  // so it also permits the popup-scoped hosts — but nothing else.
   contents.on("did-create-window", (childWindow) => {
     const wc = childWindow.webContents;
+    const popupNavAllowed = (url) => isTrusted(url) || isAllowedPopupHost(url);
     wc.setWindowOpenHandler(({ url }) => {
-      if (isTrusted(url)) return { action: "allow" };
+      if (popupNavAllowed(url)) return { action: "allow" };
       safeOpenExternal(url);
       return { action: "deny" };
     });
-    wc.on("will-navigate", blockUntrustedNav);
-    wc.on("will-redirect", blockUntrustedNav);
+    const blockUntrustedPopupNav = (event, url) => {
+      if (!popupNavAllowed(url)) event.preventDefault();
+    };
+    wc.on("will-navigate", blockUntrustedPopupNav);
+    wc.on("will-redirect", blockUntrustedPopupNav);
+
+    // When the OAuth flow returns to Facebook/Messenger, the login is done:
+    // refresh the parent Messenger view and close the popup.
+    wc.on("did-navigate", (event, url) => {
+      if (isTrusted(url)) {
+        try {
+          contents.reload();
+        } catch {}
+        try {
+          childWindow.close();
+        } catch {}
+      }
+    });
   });
 
   contents.on("context-menu", (event, params) => {
