@@ -76,6 +76,15 @@ The app enables the **hardened runtime** with entitlements in
 | `preload.js`       | Secure bridge between the DOM and the backend.              |
 | `custom_style.css` | Dark-glass styling and hiding Facebook's ads.               |
 
+## Credits
+
+Messy is a macOS fork of [nct88/Messenger-Win](https://github.com/nct88/Messenger-Win)
+(since renamed to [nct88/MessengerMulti-Windows](https://github.com/nct88/MessengerMulti-Windows)).
+It was forked at v1.3.0 and then substantially rewritten for macOS with a
+hardened security model (Electron 43, `WebContentsView`, a strict origin trust
+boundary, sandboxed per-account partitions, and a scrypt-based app lock).
+Thanks to the original author for the upstream project.
+
 ## License
 
 MIT
