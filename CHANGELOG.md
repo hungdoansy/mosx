@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.0] - 2026-07-18
+
+- refresh README, update About, and setup Apple-Silicon-only release pipeline (#3)
+- rebrand Mosx → Messy, translate to English, add OAuth login (#2)
+- stop dock icon bouncing on new messages, keep badge (#1)
+- update pnpm version and add pnpm engine requirement
+- gitignore electron-builder.env for local build settings
+- disable cookie encryption to stop repeated keychain prompts
+- bind Cmd+W to close window and reopen from dock
+- regenerate app icons from updated Messenger source art
+- ad-hoc re-sign after fuse-flip to prevent Apple Silicon launch crash
+- close popup navigation gap and tighten defense-in-depth
+- upgrade to Electron 43 + WebContentsView + secure arm64 build
+- remove Windows-only code and add a native macOS menu
+- eliminate app-layer XSS→RCE and harden trust boundaries
+- rebrand from Messlỏ to Mosx across all files
+- replace icon with 2025 Messenger logo and rewrite README for macOS fork
+- add macOS gitignore entries and migration plan
+- add macOS platform support for runtime code
+- upscale icon.png to 512x512 for macOS .icns generation
+- migrate npm to pnpm v9.15, pin Node v24 & exact dependency versions
+
 ## [1.3.0] - 2026-05-05
 ### Sửa lỗi nghiêm trọng
 - **🔧 Sửa lỗi đăng nhập sai tài khoản (Session Isolation):** Khắc phục lỗi khi đăng nhập tài khoản A nhưng hiển thị tài khoản B. Nguyên nhân: cookies/session cũ của partition bị tái sử dụng khi tạo profile mới hoặc khi session bị lỗi.
